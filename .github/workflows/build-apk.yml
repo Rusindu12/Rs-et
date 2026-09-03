@@ -29,17 +29,35 @@ jobs:
           gradle-version: '8.7'
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: Verify APK
+        if: success()
         run: ls -lh app/build/outputs/apk/debug/
 
       - name: Commit APK artifact
+        if: success()
         run: |
           mkdir -p apk
           cp app/build/outputs/apk/debug/app-debug.apk apk/RS-TradingAI.apk
+          rm -f build-failed.log
           git config user.name "arena-build-bot"
           git config user.email "arena-build-bot@users.noreply.github.com"
           git add apk/RS-TradingAI.apk
+          git rm -q --cached build-failed.log 2>/dev/null || true
+          rm -f build-failed.log
           git commit -m "chore: build APK artifact [skip ci]" || echo "No changes to commit"
+          git push
+
+      - name: Commit failure log
+        if: failure()
+        run: |
+          tail -n 200 build.log > build-failed.log || echo "no build.log" > build-failed.log
+          git config user.name "arena-build-bot"
+          git config user.email "arena-build-bot@users.noreply.github.com"
+          git rm -q --cached apk/RS-TradingAI.apk 2>/dev/null || true
+          git add build-failed.log
+          git commit -m "chore: save build failure log [skip ci]" || echo "No changes to commit"
           git push

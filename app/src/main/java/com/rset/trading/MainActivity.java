@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -47,6 +48,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(Color.parseColor("#0B0E11"));
 
         webView.setBackgroundColor(Color.parseColor("#0B0E11"));
+
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
 
         webView.setWebViewClient(new WebViewClient() {
