@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0B0E11">
+<title>Binance AI Trader</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◆</span>
+    <div>
+      <div class="title">Binance AI Trader</div>
+      <div class="sub" id="modeBadge">PAPER</div>
+    </div>
+  </div>
+  <div class="conn" id="connStatus"><span class="dot"></span><span>connecting…</span></div>
+</header>
+
+<main id="view-market" class="view active">
+  <!-- Symbol selector + price -->
+  <section class="card ticker">
+    <div class="row between">
+      <select id="symbolSelect" class="select"></select>
+      <select id="intervalSelect" class="select small">
+        <option value="1m">1m</option>
+        <option value="5m" selected>5m</option>
+        <option value="15m">15m</option>
+        <option value="1h">1h</option>
+        <option value="4h">4h</option>
+        <option value="1d">1d</option>
+      </select>
+    </div>
+    <div class="price-row">
+      <div class="price" id="lastPrice">—</div>
+      <div class="change" id="priceChange">—</div>
+    </div>
+    <div class="stats">
+      <div><span>24h High</span><b id="high24">—</b></div>
+      <div><span>24h Low</span><b id="low24">—</b></div>
+      <div><span>24h Vol</span><b id="vol24">—</b></div>
+    </div>
+  </section>
+
+  <!-- Chart -->
+  <section class="card chart-card">
+    <canvas id="chart"></canvas>
+    <div class="chart-legend">
+      <span><i style="background:#F0B90B"></i>EMA 9</span>
+      <span><i style="background:#8A5CF6"></i>EMA 21</span>
+      <span><i style="background:rgba(255,255,255,.35)"></i>BB 20</span>
+    </div>
+  </section>
+
+  <!-- AI Signal -->
+  <section class="card ai-card" id="aiCard">
+    <div class="row between">
+      <div class="ai-title">🤖 AI Signal</div>
+      <div class="ai-conf" id="aiConf">—</div>
+    </div>
+    <div class="ai-signal" id="aiSignal">ANALYZING…</div>
+    <div class="ai-bar"><div id="aiBar"></div></div>
+    <ul class="ai-reasons" id="aiReasons"></ul>
+    <div class="indicators">
+      <div><span>RSI 14</span><b id="indRsi">—</b></div>
+      <div><span>MACD</span><b id="indMacd">—</b></div>
+      <div><span>EMA 9/21</span><b id="indEma">—</b></div>
+      <div><span>BB %B</span><b id="indBb">—</b></div>
+      <div><span>Vol ×</span><b id="indVol">—</b></div>
+      <div><span>Trend</span><b id="indTrend">—</b></div>
+    </div>
+  </section>
+
+  <!-- Auto trading -->
+  <section class="card">
+    <div class="row between">
+      <div>
+        <div class="label">Auto-Trade Bot</div>
+        <div class="hint" id="botHint">Bot executes on STRONG signals</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="botToggle"><span></span></label>
+    </div>
+    <div class="grid2 mt">
+      <label class="field"><span>Order size (USDT)</span><input type="number" id="orderSize" value="50" min="10" step="10"></label>
+      <label class="field"><span>Min confidence %</span><input type="number" id="minConf" value="70" min="50" max="99"></label>
+      <label class="field"><span>Take profit %</span><input type="number" id="tpPct" value="1.5" step="0.1"></label>
+      <label class="field"><span>Stop loss %</span><input type="number" id="slPct" value="0.8" step="0.1"></label>
+    </div>
+    <div class="row gap mt">
+      <button class="btn buy" id="btnBuy">BUY</button>
+      <button class="btn sell" id="btnSell">SELL</button>
+    </div>
+  </section>
+</main>
+
+<main id="view-portfolio" class="view">
+  <section class="card">
+    <div class="label">Portfolio</div>
+    <div class="big" id="pfEquity">$0.00</div>
+    <div class="row between">
+      <div class="hint">Realized PnL: <b id="pfRealized">$0.00</b></div>
+      <div class="hint">Unrealized: <b id="pfUnrealized">$0.00</b></div>
+    </div>
+    <div class="row gap mt">
+      <button class="btn ghost" id="btnResetPaper">Reset paper balance</button>
+      <button class="btn ghost" id="btnRefreshAcc">Refresh</button>
+    </div>
+  </section>
+  <section class="card">
+    <div class="label">Open positions</div>
+    <div id="positions" class="list"><div class="empty">No open positions</div></div>
+  </section>
+  <section class="card">
+    <div class="label">Trade history</div>
+    <div id="history" class="list"><div class="empty">No trades yet</div></div>
+  </section>
+</main>
+
+<main id="view-settings" class="view">
+  <section class="card">
+    <div class="label">Trading mode</div>
+    <div class="seg" id="modeSeg">
+      <button data-mode="paper" class="on">Paper</button>
+      <button data-mode="testnet">Testnet</button>
+      <button data-mode="live">Live</button>
+    </div>
+    <p class="hint mt">
+      <b>Paper</b> simulates trades locally with real prices.<br>
+      <b>Testnet</b> places real orders on testnet.binance.vision (fake funds).<br>
+      <b>Live</b> uses your real Binance account — use at your own risk.
+    </p>
+  </section>
+
+  <section class="card">
+    <div class="label">Binance API keys</div>
+    <div class="hint" id="keyStatus">No keys saved</div>
+    <label class="field mt"><span>API Key</span><input type="text" id="apiKey" autocomplete="off" placeholder="Paste API key"></label>
+    <label class="field"><span>API Secret</span><input type="password" id="apiSecret" autocomplete="off" placeholder="Paste API secret"></label>
+    <div class="row gap mt">
+      <button class="btn primary" id="btnSaveKeys">Save securely</button>
+      <button class="btn ghost" id="btnClearKeys">Clear</button>
+    </div>
+    <p class="hint mt">Keys are stored in Android encrypted storage. Requests are signed natively; the secret never enters this page. Only enable <i>Spot Trading</i> permission — never withdrawals.</p>
+  </section>
+
+  <section class="card">
+    <div class="label">Watchlist</div>
+    <textarea id="watchlist" rows="3" placeholder="BTCUSDT, ETHUSDT, BNBUSDT"></textarea>
+    <button class="btn ghost mt" id="btnSaveWatch">Save watchlist</button>
+  </section>
+
+  <section class="card">
+    <div class="label">About</div>
+    <p class="hint">Signals are generated on-device from RSI, MACD, EMA cross, Bollinger Bands and volume. This is <b>not financial advice</b>. Crypto trading carries risk of loss.</p>
+    <p class="hint">v<span id="appVer">1.0.0</span></p>
+  </section>
+</main>
+
+<nav class="tabbar">
+  <button data-view="market" class="on"><span>📈</span>Market</button>
+  <button data-view="portfolio"><span>💼</span>Portfolio</button>
+  <button data-view="settings"><span>⚙️</span>Settings</button>
+</nav>
+
+<div id="toast" class="toast"></div>
+<div id="log" class="log"></div>
+
+<script src="bridge.js"></script>
+<script src="indicators.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

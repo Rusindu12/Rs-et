@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Candlesticks -->
+    <path android:fillColor="#0ECB81" android:pathData="M30,44h6v22h-6z"/>
+    <path android:fillColor="#0ECB81" android:pathData="M32,38h2v34h-2z"/>
+    <path android:fillColor="#F6465D" android:pathData="M42,36h6v18h-6z"/>
+    <path android:fillColor="#F6465D" android:pathData="M44,30h2v30h-2z"/>
+    <path android:fillColor="#0ECB81" android:pathData="M54,48h6v26h-6z"/>
+    <path android:fillColor="#0ECB81" android:pathData="M56,42h2v38h-2z"/>
+    <path android:fillColor="#0ECB81" android:pathData="M66,32h6v28h-6z"/>
+    <path android:fillColor="#0ECB81" android:pathData="M68,26h2v40h-2z"/>
+    <!-- AI spark -->
+    <path android:fillColor="#F0B90B" android:pathData="M78,24l2.5,6 6,2.5 -6,2.5 -2.5,6 -2.5,-6 -6,-2.5 6,-2.5z"/>
+</vector>

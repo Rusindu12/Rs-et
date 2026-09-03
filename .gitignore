@@ -1,0 +1,17 @@
+# Gradle
+.gradle/
+build/
+app/build/
+!gradle/wrapper/gradle-wrapper.jar
+# Android Studio / IDE
+.idea/
+*.iml
+local.properties
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+# Keys
+*.jks
+*.keystore
+keystore.properties
