@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>RS TradingAI</title>
+<style>
+  :root {
+    --bg: #0b0e11; --panel: #181a20; --panel2: #1e2328; --panel3: #2b3139;
+    --yellow: #f0b90b; --green: #0ecb81; --red: #f6465d;
+    --text: #eaecef; --muted: #848e9c; --border: #2b3139;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { background:var(--bg); color:var(--text); font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; height:100%; overscroll-behavior:none; }
+  body { display:flex; flex-direction:column; }
+  #app { flex:1; display:flex; flex-direction:column; max-width:640px; margin:0 auto; width:100%; }
+
+  /* Header */
+  .hdr { display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--panel); position:sticky; top:0; z-index:20; border-bottom:1px solid var(--border); }
+  .logo { font-weight:800; font-size:16px; color:var(--yellow); letter-spacing:.5px; white-space:nowrap; }
+  .logo span { color:var(--text); }
+  .sym-btn { background:var(--panel2); border:1px solid var(--border); color:var(--text); font-weight:700; padding:6px 10px; border-radius:8px; font-size:14px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--red); display:inline-block; margin-right:4px; }
+  .dot.on { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .status { font-size:11px; color:var(--muted); margin-left:auto; white-space:nowrap; display:flex; align-items:center; }
+  .icon-btn { background:none; border:none; color:var(--muted); font-size:20px; padding:4px 6px; cursor:pointer; }
+
+  /* Price */
+  .price-row { display:flex; align-items:baseline; gap:10px; padding:12px 14px 4px; flex-wrap:wrap; }
+  .big-price { font-size:28px; font-weight:800; }
+  .big-price.up { color:var(--green); } .big-price.down { color:var(--red); }
+  .chg { font-size:14px; font-weight:600; padding:2px 8px; border-radius:6px; }
+  .chg.up { color:var(--green); background:rgba(14,203,129,.12); }
+  .chg.down { color:var(--red); background:rgba(246,70,93,.12); }
+  .stats { display:flex; gap:14px; padding:4px 14px 8px; font-size:11px; color:var(--muted); flex-wrap:wrap; }
+  .stats b { color:var(--text); font-weight:600; }
+
+  /* Timeframes */
+  .tf-row { display:flex; gap:6px; padding:6px 12px; overflow-x:auto; }
+  .tf { background:var(--panel2); color:var(--muted); border:none; padding:6px 12px; border-radius:16px; font-size:12px; font-weight:700; cursor:pointer; flex-shrink:0; }
+  .tf.active { background:var(--yellow); color:#111; }
+
+  /* Chart */
+  #chartWrap { position:relative; height:300px; background:var(--panel); margin:4px 12px; border-radius:12px; border:1px solid var(--border); overflow:hidden; }
+  #chart { position:absolute; inset:0; }
+
+  /* AI Signal */
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; margin:10px 12px; padding:14px; }
+  .card h3 { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+  .sig-badge { font-size:22px; font-weight:800; text-align:center; padding:12px; border-radius:10px; margin-bottom:6px; }
+  .sig-4 { background:rgba(14,203,129,.18); color:var(--green); }
+  .sig-3 { background:rgba(14,203,129,.10); color:var(--green); }
+  .sig-2 { background:rgba(132,142,156,.12); color:var(--muted); }
+  .sig-1 { background:rgba(246,70,93,.10); color:var(--red); }
+  .sig-0 { background:rgba(246,70,93,.18); color:var(--red); }
+  .conf-bar-bg { height:8px; background:var(--panel3); border-radius:4px; overflow:hidden; margin:8px 0; }
+  .conf-bar { height:100%; background:var(--yellow); border-radius:4px; transition:width .4s; }
+  .score-line { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+  .si-txt { font-size:13px; color:var(--text); margin-top:8px; line-height:1.5; }
+  .factor { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--panel3); font-size:12px; }
+  .factor:last-child { border-bottom:none; }
+  .factor .fname { flex:1; } .factor .fval { color:var(--muted); max-width:55%; text-align:right; font-size:11px; }
+  .mini-badge { font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; min-width:34px; text-align:center; }
+  .b-buy { background:rgba(14,203,129,.15); color:var(--green); }
+  .b-sell { background:rgba(246,70,93,.15); color:var(--red); }
+  .b-flat { background:rgba(132,142,156,.15); color:var(--muted); }
+
+  /* Bot */
+  .mode-row { display:flex; gap:6px; margin-bottom:12px; }
+  .mode { flex:1; padding:10px 4px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); color:var(--muted); font-size:12px; font-weight:700; cursor:pointer; text-align:center; }
+  .mode small { display:block; font-size:9px; font-weight:400; margin-top:2px; }
+  .mode.active { border-color:var(--yellow); color:var(--text); background:rgba(240,185,11,.08); }
+  .mode.live.active { border-color:var(--red); background:rgba(246,70,93,.10); }
+  .kv { display:flex; justify-content:space-between; align-items:center; padding:8px 0; font-size:13px; }
+  .kv .k { color:var(--muted); }
+  .kv b { color:var(--text); }
+  input[type=range] { width:130px; accent-color:var(--yellow); }
+  .num-inp { width:80px; background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:6px 8px; border-radius:8px; font-size:13px; text-align:right; }
+  .btn { display:block; width:100%; padding:13px; border:none; border-radius:10px; font-size:15px; font-weight:800; cursor:pointer; margin-top:10px; }
+  .btn-start { background:var(--green); color:#fff; }
+  .btn-stop { background:var(--red); color:#fff; }
+  .btn-warn { background:transparent; border:1px solid var(--border); color:var(--muted); font-size:12px; padding:10px; }
+  .pos-box { border:1px solid var(--border); border-radius:10px; padding:12px; margin-top:10px; background:var(--panel2); }
+  .pos-box .upnl { font-size:20px; font-weight:800; }
+  .pos-box .upnl.up { color:var(--green); } .pos-box .upnl.down { color:var(--red); }
+
+  /* Tables */
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th { color:var(--muted); font-weight:600; text-align:left; padding:6px 4px; border-bottom:1px solid var(--border); font-size:11px; }
+  td { padding:7px 4px; border-bottom:1px solid var(--panel3); }
+  .t-buy { color:var(--green); font-weight:700; } .t-sell { color:var(--red); font-weight:700; }
+
+  /* Bottom nav */
+  .nav { display:flex; background:var(--panel); border-top:1px solid var(--border); position:sticky; bottom:0; z-index:20; padding-bottom:env(safe-area-inset-bottom); }
+  .nav button { flex:1; background:none; border:none; color:var(--muted); padding:10px 0 8px; font-size:10px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .nav button .ico { font-size:18px; }
+  .nav button.active { color:var(--yellow); }
+
+  .section { display:none; flex:1; overflow-y:auto; padding-bottom:8px; }
+  .section.active { display:block; }
+
+  /* Modal */
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:50; display:none; align-items:flex-end; }
+  .modal-bg.open { display:flex; }
+  .modal { background:var(--panel); width:100%; max-width:640px; border-radius:16px 16px 0 0; max-height:85vh; overflow-y:auto; padding:16px; }
+  .modal h2 { font-size:16px; margin-bottom:4px; }
+  .modal .sub { font-size:12px; color:var(--muted); margin-bottom:14px; }
+  .field label { font-size:11px; color:var(--muted); display:block; margin:10px 0 4px; }
+  .field input, .field select { width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:10px 12px; border-radius:8px; font-size:14px; }
+  .note { font-size:11px; color:var(--muted); line-height:1.6; margin-top:10px; }
+  .warn { color:var(--red); }
+  .close-x { float:right; background:none; border:none; color:var(--muted); font-size:22px; }
+
+  /* Symbol picker */
+  .sym-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:10px; }
+  .sym-cell { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:9px 2px; text-align:center; font-size:12px; font-weight:700; cursor:pointer; color:var(--text); }
+  .sym-cell.active { background:var(--yellow); color:#111; }
+  .sym-search { width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:10px 12px; border-radius:8px; font-size:14px; }
+
+  /* Toast */
+  #toast { position:fixed; left:50%; transform:translateX(-50%); bottom:80px; background:var(--panel3); color:var(--text); padding:10px 16px; border-radius:10px; font-size:13px; z-index:99; display:none; max-width:88%; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,.5); }
+  .feed-item { padding:8px 0; border-bottom:1px solid var(--panel3); font-size:12px; display:flex; gap:8px; align-items:center; }
+  .feed-item .t { color:var(--muted); font-size:10px; min-width:56px; }
+  .badge-lv { font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; }
+  .muted { color:var(--muted); }
+  .green { color:var(--green); } .red { color:var(--red); }
+  .banner { background:rgba(246,70,93,.15); color:var(--red); font-size:11px; text-align:center; padding:6px; display:none; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="logo">RS<span>·AI</span></div>
+    <button class="sym-btn" id="symBtn" onclick="openSymPicker()">BTC/USDT ▾</button>
+    <div class="status"><span class="dot" id="wsDot"></span><span id="wsTxt">connect…</span></div>
+    <button class="icon-btn" onclick="openSettings()">⚙️</button>
+  </div>
+  <div class="banner" id="errBanner"></div>
+
+  <!-- Price -->
+  <div class="price-row">
+    <div class="big-price" id="bigPrice">--</div>
+    <div class="chg" id="chg24">--%</div>
+  </div>
+  <div class="stats">
+    <div>24h High <b id="h24">--</b></div>
+    <div>24h Low <b id="l24">--</b></div>
+    <div>Vol <b id="v24">--</b></div>
+    <div id="balChip">💵 <b id="balTxt">--</b> USDT</div>
+  </div>
+
+  <!-- Timeframes -->
+  <div class="tf-row" id="tfRow">
+    <button class="tf" data-tf="1m">1m</button>
+    <button class="tf active" data-tf="5m">5m</button>
+    <button class="tf" data-tf="15m">15m</button>
+    <button class="tf" data-tf="1h">1H</button>
+    <button class="tf" data-tf="4h">4H</button>
+    <button class="tf" data-tf="1d">1D</button>
+  </div>
+
+  <!-- Chart -->
+  <div id="chartWrap"><div id="chart"></div></div>
+
+  <!-- Sections -->
+  <div class="section active" id="sec-chart"></div>
+
+  <div class="section" id="sec-ai">
+    <div class="card" id="sigCard">
+      <h3>🤖 AI Signal <span class="muted" id="sigUpdated" style="margin-left:auto;font-weight:400"></span></h3>
+      <div class="sig-badge sig-2" id="sigBadge">ANALYZING…</div>
+      <div class="conf-bar-bg"><div class="conf-bar" id="confBar" style="width:0%"></div></div>
+      <div class="score-line"><span>Score: <b id="sigScore">0</b></span><span>Confidence: <b id="sigConf">0%</b></span></div>
+      <div class="si-txt" id="sigSi"></div>
+      <div class="si-txt muted" style="font-size:11px">ATR% <b id="sigAtr">--</b> · suggested TP <b id="sigTp">--</b>% / SL <b id="sigSl">--</b>%</div>
+    </div>
+    <div class="card">
+      <h3>📊 Indicator Breakdown</h3>
+      <div id="factorList"><div class="muted">Waiting for data…</div></div>
+    </div>
+    <div class="card">
+      <h3>📡 Signal Feed</h3>
+      <div id="feedList"><div class="muted" style="font-size:12px">Signal changes මෙතන පෙන්වයි…</div></div>
+    </div>
+  </div>
+
+  <div class="section" id="sec-bot">
+    <div class="card">
+      <h3>🤖 Auto-Trading Bot</h3>
+      <div class="mode-row">
+        <div class="mode active" data-mode="paper" onclick="setMode('paper')">PAPER<small>fake 💰 safe</small></div>
+        <div class="mode" data-mode="testnet" onclick="setMode('testnet')">TESTNET<small>fake keys 🟡</small></div>
+        <div class="mode live" data-mode="live" onclick="setMode('live')">LIVE<small>real money 🔴</small></div>
+      </div>
+      <div class="note" id="modeNote">🟢 <b>Paper mode:</b> virtual $10,000 — real market data, fake money. 100% safe.</div>
+
+      <div class="kv"><span class="k">Trade size (% balance)</span><span><input type="range" min="1" max="100" value="10" id="botPct" oninput="botPctVal.textContent=this.value+'%'; saveBotCfg()"> <b id="botPctVal">10%</b></span></div>
+      <div class="kv"><span class="k">Take profit %</span><input class="num-inp" type="number" id="botTp" value="1.5" step="0.1" min="0.1" onchange="saveBotCfg()"></div>
+      <div class="kv"><span class="k">Stop loss %</span><input class="num-inp" type="number" id="botSl" value="1.0" step="0.1" min="0.1" onchange="saveBotCfg()"></div>
+      <div class="kv"><span class="k">Min AI score (entry)</span><input class="num-inp" type="number" id="botMin" value="55" step="5" min="20" max="100" onchange="saveBotCfg()"></div>
+      <button class="btn btn-start" id="botBtn" onclick="toggleBot()">▶ START BOT</button>
+      <div class="note" id="botStatus">Bot OFF — signals monitor කරනවා පමණයි.</div>
+    </div>
+
+    <div class="card" id="posCard" style="display:none">
+      <h3>📌 Open Position</h3>
+      <div class="pos-box">
+        <div class="kv"><span class="k">Entry</span><b id="posEntry">--</b></div>
+        <div class="kv"><span class="k">Qty</span><b id="posQty">--</b></div>
+        <div class="kv"><span class="k">Value</span><b id="posVal">--</b></div>
+        <div class="kv"><span class="k">Unrealized P&L</span><span class="upnl" id="posPnl">--</span></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-stop" style="margin:0" onclick="manualClose()">SELL / CLOSE</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📈 Bot Performance</h3>
+      <div class="kv"><span class="k">Total P&L</span><b id="perfPnl">--</b></div>
+      <div class="kv"><span class="k">Trades (win/loss)</span><b id="perfWl">--</b></div>
+      <div class="kv"><span class="k">Win rate</span><b id="perfWr">--</b></div>
+      <button class="btn btn-warn" onclick="resetPaper()">↺ Reset paper account ($10,000)</button>
+    </div>
+  </div>
+
+  <div class="section" id="sec-hist">
+    <div class="card">
+      <h3>📒 Trade History</h3>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Time</th><th>Side</th><th>Price</th><th>Qty</th><th>P&L</th><th>Mode</th></tr></thead>
+          <tbody id="tradeBody"><tr><td colspan="6" class="muted">ගණුදෙනු නෑ</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom nav -->
+  <div class="nav">
+    <button class="active" data-sec="sec-chart" onclick="switchSec(this)"><span class="ico">📈</span>Chart</button>
+    <button data-sec="sec-ai" onclick="switchSec(this)"><span class="ico">🤖</span>AI Signals</button>
+    <button data-sec="sec-bot" onclick="switchSec(this)"><span class="ico">⚡</span>Bot</button>
+    <button data-sec="sec-hist" onclick="switchSec(this)"><span class="ico">📒</span>History</button>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-bg" id="setModal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <button class="close-x" onclick="closeSettings()">✕</button>
+    <h2>⚙️ Settings</h2>
+    <div class="sub">Binance API keys ඔයාගේ phone එකේම store වෙනවා (localStorage). කිසිම server එකකට යන්නේ නෑ.</div>
+    <div class="field">
+      <label>API Key</label>
+      <input type="text" id="apiKey" placeholder="Binance API key" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>API Secret</label>
+      <input type="password" id="apiSecret" placeholder="Binance API secret" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>API Base (orders)</label>
+      <select id="apiBase">
+        <option value="https://api.binance.com">Live — api.binance.com</option>
+        <option value="https://testnet.binance.vision">Testnet — testnet.binance.vision</option>
+      </select>
+    </div>
+    <button class="btn btn-start" onclick="testApi()" style="background:var(--yellow);color:#111">🔌 Test Connection</button>
+    <button class="btn btn-warn" onclick="saveSettings()">💾 Save</button>
+    <div class="note" id="apiTestResult"></div>
+    <div class="note warn">⚠️ LIVE mode = real money. API key එකහි withdrawals permission දෙන්න එපා! Trade permission පමණයි ඕන.<br><br>
+    Testnet keys: <b>testnet.binance.vision</b> — GitHub account එකෙන් login වෙලා free keys ගන්න පුළුවන් (fake money).<br><br>
+    Live keys: Binance → Profile → API Management → create (Spot &amp; Margin Trading ✓, Withdrawals ✗) + IP restriction දානවා නම් වඩා safe.</div>
+  </div>
+</div>
+
+<!-- Symbol Picker Modal -->
+<div class="modal-bg" id="symModal" onclick="if(event.target===this)closeSymPicker()">
+  <div class="modal">
+    <button class="close-x" onclick="closeSymPicker()">✕</button>
+    <h2>Select Pair</h2>
+    <div class="sub">USDT pairs</div>
+    <input class="sym-search" id="symSearch" placeholder="Search (e.g. BTC, SOL, PEPE)" oninput="renderSymGrid()" maxlength="10">
+    <div class="sym-grid" id="symGrid"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="js/engine.js"></script>
+<script src="js/lightweight-charts.js"></script>
+<script>
+'use strict';
+
+/* ================= State ================= */
+const DATA_BASE = 'https://api.binance.com';
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('rset_' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('rset_' + k, JSON.stringify(v)); } catch (e) {} }
+};
+
+const SYMBOLS = ['BTC','ETH','BNB','SOL','XRP','DOGE','ADA','AVAX','LINK','TRX','DOT','LTC','SHIB','PEPE','ARB','OP','FIL','ATOM','NEAR','WIF','SUI','TON'];
+
+const App = {
+  symbol: LS.get('symbol', 'BTCUSDT'),
+  interval: LS.get('interval', '5m'),
+  candles: [],
+  signal: null,
+  lastSigLabel: null,
+  price: 0,
+  prevPrice: 0,
+  ticker: {},
+  mode: LS.get('mode', 'paper'),
+  ws: null, wsAlive: false, wsRetry: 0,
+  timeOffset: 0,
+  paper: LS.get('paper', { usdt: 10000, position: null }),
+  trades: LS.get('trades', []),
+  bot: LS.get('botcfg', { on: false, pct: 10, tp: 1.5, sl: 1.0, minScore: 55, lastEntryCandle: 0 }),
+  api: LS.get('api', { key: '', secret: '', base: 'https://api.binance.com' }),
+  feed: LS.get('feed', []),
+  exch: null, // {step, tick, minNotional}
+  chart: null, candleSeries: null, volSeries: null, ema20S: null, ema50S: null
+};
+
+/* ================= Helpers ================= */
+const $ = id => document.getElementById(id);
+function toast(msg, ms) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms || 2600);
+  if (navigator.vibrate) { try { navigator.vibrate(30); } catch (e) {} }
+}
+function fmtPrice(p) {
+  if (p == null || isNaN(p)) return '--';
+  if (p >= 1000) return p.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (p >= 1) return p.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  return p.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+function fmtQty(q) { return q == null ? '--' : (+q).toPrecision(6).replace(/\.?0+$/, ''); }
+function fmtUsd(v, sign) {
+  const s = sign && v > 0 ? '+' : '';
+  return s + '$' + (+v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function ts2hm(ts) { const d = new Date(ts); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+function showBanner(msg) { const b = $('errBanner'); if (msg) { b.textContent = '⚠ ' + msg; b.style.display = 'block'; } else b.style.display = 'none'; }
+
+/* ================= REST helpers ================= */
+async function rest(path, params) {
+  let url = DATA_BASE + path;
+  if (params) url += '?' + Engine.buildQuery(params);
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function signedRequest(method, path, params) {
+  if (!App.api.key || !App.api.secret) throw new Error('API keys දාන්න (⚙️ Settings)');
+  const p = Object.assign({}, params);
+  p.recvWindow = 5000;
+  p.timestamp = Date.now() + App.timeOffset;
+  const query = Engine.buildQuery(p);
+  const sig = await Engine.hmacSign(App.api.secret, query);
+  const url = App.api.base + path + '?' + query + '&signature=' + sig;
+  const r = await fetch(url, { method: method, headers: { 'X-MBX-APIKEY': App.api.key } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.msg || ('HTTP ' + r.status)));
+  return j;
+}
+
+async function syncTime() {
+  try { const t = await rest('/api/v3/time'); App.timeOffset = t.serverTime - Date.now(); } catch (e) {}
+}
+
+/* ================= Chart ================= */
+function initChart() {
+  const chart = LightweightCharts.createChart($('chart'), {
+    layout: { background: { type: 'solid', color: '#181a20' }, textColor: '#848e9c', fontSize: 10 },
+    grid: { vertLines: { color: '#22262c' }, horzLines: { color: '#22262c' } },
+    rightPriceScale: { borderColor: '#2b3139' },
+    timeScale: { borderColor: '#2b3139', timeVisible: true, secondsVisible: false },
+    crosshair: { mode: 0 },
+    handleScroll: true, handleScale: true
+  });
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: '#0ecb81', downColor: '#f6465d', borderUpColor: '#0ecb81', borderDownColor: '#f6465d',
+    wickUpColor: '#0ecb81', wickDownColor: '#f6465d', priceLineColor: '#f0b90b'
+  });
+  const volSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
+  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+  const ema20S = chart.addLineSeries({ color: '#f0b90b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  const ema50S = chart.addLineSeries({ color: '#5b8def', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  App.chart = chart; App.candleSeries = candleSeries; App.volSeries = volSeries; App.ema20S = ema20S; App.ema50S = ema50S;
+  const ro = new ResizeObserver(() => chart.applyOptions({ width: $('chartWrap').clientWidth, height: $('chartWrap').clientHeight }));
+  ro.observe($('chartWrap'));
+  chart.applyOptions({ width: $('chartWrap').clientWidth, height: $('chartWrap').clientHeight });
+}
+
+function candlesToChart() {
+  const data = App.candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+  App.candleSeries.setData(data);
+  App.volSeries.setData(App.candles.map(c => ({ time: c.time, value: c.volume, color: c.close >= c.open ? 'rgba(14,203,129,.4)' : 'rgba(246,70,93,.4)' })));
+  const closes = App.candles.map(c => c.close);
+  const e20 = Engine.emaSeries(closes, 20), e50 = Engine.emaSeries(closes, 50);
+  const d20 = [], d50 = [];
+  for (let i = 0; i < App.candles.length; i++) {
+    if (e20[i] != null) d20.push({ time: App.candles[i].time, value: e20[i] });
+    if (e50[i] != null) d50.push({ time: App.candles[i].time, value: e50[i] });
+  }
+  App.ema20S.setData(d20); App.ema50S.setData(d50);
+}
+
+function updateLastBar(k) {
+  // k = raw kline event data
+  const bar = { time: Math.floor(k.t / 1000), open: +k.o, high: +k.h, low: +k.l, close: +k.c };
+  App.candleSeries.update(bar);
+  App.volSeries.update({ time: bar.time, value: +k.v, color: bar.close >= bar.open ? 'rgba(14,203,129,.4)' : 'rgba(246,70,93,.4)' });
+  // update local candle array
+  const last = App.candles[App.candles.length - 1];
+  if (last && last.time === bar.time) {
+    last.open = bar.open; last.high = bar.high; last.low = bar.low; last.close = bar.close; last.volume = +k.v;
+  } else if (!last || bar.time > last.time) {
+    App.candles.push({ time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: +k.v });
+    if (App.candles.length > 600) App.candles.shift();
+    if (k.x) onCandleClose(); // closed via new bar appearing
+  }
+  // live EMA update (light approximation: recompute last point)
+  const closes = App.candles.map(c => c.close);
+  const e20 = Engine.ema(closes, 20), e50 = Engine.ema(closes, 50);
+  const t = App.candles[App.candles.length - 1].time;
+  if (e20 != null) App.ema20S.update({ time: t, value: e20 });
+  if (e50 != null) App.ema50S.update({ time: t, value: e50 });
+}
+
+/* ================= Data loading ================= */
+async function loadCandles() {
+  showBanner(null);
+  try {
+    const raw = await rest('/api/v3/klines', { symbol: App.symbol, interval: App.interval, limit: 400 });
+    App.candles = raw.map(k => ({ time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] }));
+    candlesToChart();
+    App.price = App.candles[App.candles.length - 1].close;
+    computeAndRenderSignal();
+    loadExchangeInfo();
+  } catch (e) {
+    showBanner('Data load fail — internet check කරන්න (' + e.message + ')');
+  }
+}
+
+async function loadExchangeInfo() {
+  try {
+    const cached = LS.get('exch_' + App.symbol, null);
+    if (cached && Date.now() - cached.ts < 86400000) { App.exch = cached; return; }
+    const j = await rest('/api/v3/exchangeInfo', { symbol: App.symbol });
+    const f = j.symbols[0].filters;
+    const info = {
+      ts: Date.now(),
+      step: (f.find(x => x.filterType === 'LOT_SIZE') || {}).stepSize || '0.00010000',
+      tick: (f.find(x => x.filterType === 'PRICE_FILTER') || {}).tickSize || '0.01000000',
+      minNotional: +((f.find(x => x.filterType === 'NOTIONAL') || f.find(x => x.filterType === 'MIN_NOTIONAL') || {}).minNotional || 5)
+    };
+    App.exch = info; LS.set('exch_' + App.symbol, info);
+  } catch (e) { App.exch = { step: '0.00010000', tick: '0.01000000', minNotional: 5, ts: Date.now() }; }
+}
+
+/* ================= WebSocket ================= */
+function wsConnect() {
+  if (App.ws) { try { App.ws.close(); } catch (e) {} }
+  const s = App.symbol.toLowerCase();
+  const url = 'wss://stream.binance.com:9443/stream?streams=' + s + '@kline_' + App.interval + '/' + s + '@ticker';
+  setWs(false, 'connect…');
+  let ws;
+  try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
+  App.ws = ws;
+
+  ws.onopen = () => { App.wsRetry = 0; setWs(true, 'live'); };
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    const d = msg.data || msg;
+    if (d.e === 'kline') {
+      updateLastBar(d.k);
+      App.prevPrice = App.price;
+      App.price = +d.k.c;
+      renderPrice();
+      onTick();
+      if (d.k.x) onCandleClose();
+    } else if (d.e === '24hrTicker') {
+      App.ticker = d;
+      renderTicker();
+    }
+  };
+  ws.onclose = () => { setWs(false, 'offline'); scheduleReconnect(); };
+  ws.onerror = () => { try { ws.close(); } catch (e) {} };
+}
+function scheduleReconnect() {
+  if (App.wsRetry > 8) { setWs(false, 'offline — retry later'); setTimeout(scheduleReconnect0, 30000); return; }
+  const delay = Math.min(30000, 1000 * Math.pow(2, App.wsRetry++));
+  setTimeout(() => { if (!App.wsAlive) wsConnect(); }, delay);
+}
+function scheduleReconnect0() { App.wsRetry = 0; wsConnect(); }
+function setWs(ok, txt) { App.wsAlive = ok; $('wsDot').className = 'dot' + (ok ? ' on' : ''); $('wsTxt').textContent = txt; }
+
+/* ================= Rendering ================= */
+function renderPrice() {
+  const el = $('bigPrice');
+  el.textContent = fmtPrice(App.price);
+  if (App.prevPrice && App.price !== App.prevPrice) el.className = 'big-price ' + (App.price > App.prevPrice ? 'up' : 'down');
+}
+
+function renderTicker() {
+  const t = App.ticker;
+  const pct = +t.P || 0;
+  const c = $('chg24');
+  c.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+  c.className = 'chg ' + (pct >= 0 ? 'up' : 'down');
+  $('h24').textContent = fmtPrice(+t.h);
+  $('l24').textContent = fmtPrice(+t.l);
+  const qv = +t.q;
+  $('v24').textContent = qv >= 1e9 ? (qv / 1e9).toFixed(2) + 'B' : qv >= 1e6 ? (qv / 1e6).toFixed(2) + 'M' : qv >= 1e3 ? (qv / 1e3).toFixed(1) + 'K' : qv.toFixed(0);
+}
+
+function miniBadge(v) {
+  if (v >= 20) return '<span class="mini-badge b-buy">BUY</span>';
+  if (v <= -20) return '<span class="mini-badge b-sell">SELL</span>';
+  return '<span class="mini-badge b-flat">FLAT</span>';
+}
+
+function computeAndRenderSignal() {
+  const sig = Engine.computeSignal(App.candles);
+  App.signal = sig;
+  if (!sig.ok) { $('sigBadge').textContent = 'WAITING DATA…'; return; }
+
+  const b = $('sigBadge');
+  b.textContent = sig.label + '  ·  ' + sig.confidence + '%';
+  b.className = 'sig-badge sig-' + sig.level;
+  $('confBar').style.width = sig.confidence + '%';
+  $('sigScore').textContent = (sig.score > 0 ? '+' : '') + sig.score;
+  $('sigConf').textContent = sig.confidence + '%';
+  $('sigSi').textContent = '🇱🇰 ' + Engine.sinhalaSummary(sig);
+  $('sigAtr').textContent = sig.atrPct + '%';
+  $('sigTp').textContent = (sig.atrPct * 1.5).toFixed(2);
+  $('sigSl').textContent = (sig.atrPct).toFixed(2);
+  $('sigUpdated').textContent = 'updated ' + ts2hm(sig.ts);
+
+  $('factorList').innerHTML = sig.factors.map(f =>
+    '<div class="factor">' + miniBadge(f.value) + '<span class="fname">' + f.name + '</span><span class="fval">' + f.text + '</span></div>'
+  ).join('');
+
+  // feed on label change
+  if (App.lastSigLabel !== sig.label) {
+    App.lastSigLabel = sig.label;
+    App.feed.unshift({ t: Date.now(), label: sig.label, level: sig.level, price: sig.price, conf: sig.confidence, symbol: App.symbol });
+    if (App.feed.length > 40) App.feed.length = 40;
+    LS.set('feed', App.feed);
+    renderFeed();
+  }
+}
+
+function renderFeed() {
+  const el = $('feedList');
+  if (!App.feed.length) return;
+  el.innerHTML = App.feed.map(f =>
+    '<div class="feed-item"><span class="t">' + ts2hm(f.t) + '</span>' +
+    '<span class="badge-lv ' + (f.level >= 3 ? 'b-buy' : f.level <= 1 ? 'b-sell' : 'b-flat') + '">' + f.label + '</span>' +
+    '<span>' + f.symbol.replace('USDT', '') + ' @ ' + fmtPrice(f.price) + '</span>' +
+    '<span class="muted" style="margin-left:auto">' + f.conf + '%</span></div>'
+  ).join('');
+}
+
+function renderBalance() {
+  if (App.mode === 'paper') {
+    let total = App.paper.usdt;
+    if (App.paper.position && App.price) total += App.paper.position.qty * App.price;
+    $('balTxt').textContent = fmtUsd(total);
+    $('balChip').title = 'Paper equity';
+  } else {
+    $('balTxt').textContent = App.api.key ? 'API' : '--';
+  }
+}
+
+function renderPosition() {
+  const p = App.paper.position;
+  const card = $('posCard');
+  if (!p) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  $('posEntry').textContent = fmtPrice(p.entryPrice);
+  $('posQty').textContent = fmtQty(p.qty) + ' ' + App.symbol.replace('USDT', '');
+  $('posVal').textContent = fmtUsd(p.qty * (App.price || p.entryPrice));
+  const pnl = (App.price - p.entryPrice) * p.qty;
+  const el = $('posPnl');
+  el.textContent = fmtUsd(pnl, true);
+  el.className = 'upnl ' + (pnl >= 0 ? 'up' : 'down');
+}
+
+function renderPerf() {
+  const trades = App.trades.filter(t => t.pnl != null);
+  if (!trades.length) {
+    $('perfPnl').textContent = '--'; $('perfWl').textContent = '0'; $('perfWr').textContent = '--';
+    return;
+  }
+  const total = trades.reduce((a, t) => a + t.pnl, 0);
+  const wins = trades.filter(t => t.pnl > 0).length;
+  $('perfPnl').textContent = fmtUsd(total, true);
+  $('perfPnl').className = total >= 0 ? 'green' : 'red';
+  $('perfWl').textContent = trades.length + ' (' + wins + '/' + (trades.length - wins) + ')';
+  $('perfWr').textContent = (wins / trades.length * 100).toFixed(1) + '%';
+}
+
+function renderTrades() {
+  const body = $('tradeBody');
+  if (!App.trades.length) { body.innerHTML = '<tr><td colspan="6" class="muted">ගණුදෙනු නෑ</td></tr>'; return; }
+  body.innerHTML = App.trades.slice(0, 60).map(t =>
+    '<tr><td class="muted">' + ts2hm(t.time) + '</td>' +
+    '<td class="' + (t.side === 'BUY' ? 't-buy' : 't-sell') + '">' + t.side + '</td>' +
+    '<td>' + fmtPrice(t.price) + '</td>' +
+    '<td>' + fmtQty(t.qty) + '</td>' +
+    '<td class="' + (t.pnl > 0 ? 'green' : t.pnl < 0 ? 'red' : 'muted') + '">' + (t.pnl != null ? fmtUsd(t.pnl, true) : '—') + '</td>' +
+    '<td class="muted">' + (t.mode || 'paper') + '</td></tr>'
+  ).join('');
+}
+
+function renderAll() { renderPrice(); renderBalance(); renderPosition(); renderPerf(); renderTrades(); renderFeed(); }
+
+/* ================= Bot / Trading ================= */
+function setMode(m) {
+  if (m === 'live' && !confirm('🔴 LIVE MODE — REAL MONEY!\n\nඔයාගේ Binance account එකේ real trades වෙනවා.\nAPI keys ඕන (withdrawal permission නැති key එකක්).\n\nContinue?')) return;
+  App.mode = m; LS.set('mode', m);
+  document.querySelectorAll('.mode').forEach(el => el.classList.toggle('active', el.dataset.mode === m));
+  $('modeNote').innerHTML = m === 'paper'
+    ? '🟢 <b>Paper mode:</b> virtual $10,000 — real market data, fake money. 100% safe.'
+    : m === 'testnet'
+      ? '🟡 <b>Testnet mode:</b> testnet.binance.vision fake funds — API keys ඕන (⚙️ Settings බලන්න).'
+      : '🔴 <b>LIVE MODE:</b> REAL MONEY! Trade size පොඩිවට තියාගන්න. TP/SL හැමවෙලාවෙම check කරන්න.';
+  renderBalance();
+}
+
+function saveBotCfg() {
+  App.bot.pct = +$('botPct').value;
+  App.bot.tp = +$('botTp').value || 1.5;
+  App.bot.sl = +$('botSl').value || 1.0;
+  App.bot.minScore = +$('botMin').value || 55;
+  LS.set('botcfg', App.bot);
+}
+
+function toggleBot() {
+  saveBotCfg();
+  App.bot.on = !App.bot.on;
+  LS.set('botcfg', App.bot);
+  const btn = $('botBtn');
+  if (App.bot.on) {
+    btn.textContent = '⏸ STOP BOT'; btn.className = 'btn btn-stop';
+    $('botStatus').innerHTML = 'Bot <b class="green">ON</b> — AI signal ' + App.bot.minScore + '+ ආදාම ' + App.symbol + ' buy කරනවා. TP ' + App.bot.tp + '% / SL ' + App.bot.sl + '%';
+    if (App.mode !== 'paper' && (!App.api.key || !App.api.secret)) { toast('⚠️ API keys නෑ — Settings එකේ දාන්න'); }
+    toast('🤖 Bot ON (' + App.mode.toUpperCase() + ')');
+  } else {
+    btn.textContent = '▶ START BOT'; btn.className = 'btn btn-start';
+    $('botStatus').textContent = 'Bot OFF — signals monitor කරනවා පමණයි.';
+    toast('Bot OFF');
+  }
+}
+
+async function getLiveBalance() {
+  if (App.mode === 'paper') return App.paper.usdt;
+  const acc = await signedRequest('GET', '/api/v3/account', {});
+  const usdt = acc.balances.find(b => b.asset === 'USDT');
+  return usdt ? +usdt.free : 0;
+}
+
+async function botBuy(reason) {
+  if (App.paper.position) return;
+  const price = App.price;
+  try {
+    if (App.mode === 'paper') {
+      const spend = Math.min(App.paper.usdt * App.bot.pct / 100, App.paper.usdt);
+      if (spend < 5) { toast('Balance ප්‍රමාණවත් නෑ'); return; }
+      const qty = spend / price;
+      App.paper.usdt -= spend;
+      App.paper.position = { qty, entryPrice: price, spend, time: Date.now() };
+      LS.set('paper', App.paper);
+      recordTrade('BUY', price, qty, null, reason);
+      toast('🟢 PAPER BUY ' + fmtQty(qty) + ' @ ' + fmtPrice(price));
+    } else {
+      const bal = await getLiveBalance();
+      const spend = bal * App.bot.pct / 100;
+      if (spend < Math.max(5, (App.exch || {}).minNotional || 5)) { toast('Balance ප්‍රමාණවත් නෑ (min ~$' + ((App.exch || {}).minNotional || 5) + ')'); return; }
+      const res = await signedRequest('POST', '/api/v3/order', {
+        symbol: App.symbol, side: 'BUY', type: 'MARKET', quoteOrderQty: spend.toFixed(2)
+      });
+      // figure actual fill
+      let qty = 0, quote = spend;
+      try {
+        const fills = (await signedRequest('GET', '/api/v3/order', { symbol: App.symbol, orderId: res.orderId })).fills || res.fills || [];
+        qty = fills.reduce((a, f) => a + +f.qty, 0);
+        quote = fills.reduce((a, f) => a + +f.price * +f.qty, 0) || spend;
+      } catch (e) { qty = spend / price; }
+      const entry = quote / qty;
+      App.paper.position = { qty, entryPrice: entry, spend: quote, time: Date.now(), orderId: res.orderId };
+      LS.set('paper', App.paper);
+      recordTrade('BUY', entry, qty, null, reason);
+      toast('🟢 ' + App.mode.toUpperCase() + ' BUY ' + fmtQty(qty) + ' @ ' + fmtPrice(entry));
+    }
+    renderAll();
+  } catch (e) {
+    toast('❌ Buy fail: ' + e.message);
+    recordError('BUY', e.message);
+  }
+}
+
+async function botSell(reason) {
+  const p = App.paper.position;
+  if (!p) return;
+  const price = App.price;
+  try {
+    if (App.mode === 'paper') {
+      const proceeds = p.qty * price;
+      App.paper.usdt += proceeds;
+      const pnl = proceeds - p.spend;
+      App.paper.position = null;
+      LS.set('paper', App.paper);
+      recordTrade('SELL', price, p.qty, pnl, reason);
+      toast((pnl >= 0 ? '✅' : '🔻') + ' PAPER SELL ' + fmtUsd(pnl, true));
+    } else {
+      const step = (App.exch || {}).step || '0.00010000';
+      const qty = Engine.roundQty(p.qty, step);
+      if (qty <= 0) { toast('Qty පොඩි වැඩි — dust විතරයි ඉතුරු'); App.paper.position = null; LS.set('paper', App.paper); return; }
+      await signedRequest('POST', '/api/v3/order', { symbol: App.symbol, side: 'SELL', type: 'MARKET', quantity: qty });
+      const proceeds = qty * price;
+      const pnl = proceeds - p.spend;
+      App.paper.position = null;
+      LS.set('paper', App.paper);
+      recordTrade('SELL', price, qty, pnl, reason);
+      toast((pnl >= 0 ? '✅' : '🔻') + ' ' + App.mode.toUpperCase() + ' SELL ' + fmtUsd(pnl, true));
+    }
+    renderAll();
+  } catch (e) {
+    toast('❌ Sell fail: ' + e.message);
+    recordError('SELL', e.message);
+  }
+}
+
+function manualClose() { botSell('manual'); }
+
+function recordTrade(side, price, qty, pnl, reason) {
+  App.trades.unshift({ time: Date.now(), side, symbol: App.symbol, price, qty, pnl, mode: App.mode, reason: reason || '' });
+  if (App.trades.length > 200) App.trades.length = 200;
+  LS.set('trades', App.trades);
+  renderAll();
+}
+function recordError(side, msg) {
+  App.trades.unshift({ time: Date.now(), side: side + '_FAIL', symbol: App.symbol, price: 0, qty: 0, pnl: null, mode: App.mode, reason: msg.slice(0, 80) });
+  LS.set('trades', App.trades);
+  renderTrades();
+}
+
+/* Called every price tick: TP/SL guard */
+function onTick() {
+  const p = App.paper.position;
+  if (!p || !App.price) return;
+  const pct = (App.price - p.entryPrice) / p.entryPrice * 100;
+  const tp = App.bot.tp, sl = App.bot.sl;
+  if (pct >= tp) { botSell('take-profit +' + pct.toFixed(2) + '%'); }
+  else if (pct <= -sl) { botSell('stop-loss ' + pct.toFixed(2) + '%'); }
+  renderPosition();
+}
+
+/* Called on candle close: AI decision */
+function onCandleClose() {
+  computeAndRenderSignal();
+  renderBalance();
+  const sig = App.signal;
+  if (!App.bot.on || !sig || !sig.ok) return;
+  // cooldown: 3 candles
+  const candleTime = App.candles.length ? App.candles[App.candles.length - 1].time : 0;
+  if (candleTime && candleTime === App.bot.lastEntryCandle) return;
+  const p = App.paper.position;
+  if (p) {
+    // early exit on strong reverse signal
+    if (sig.score <= -App.bot.minScore) botSell('AI reverse signal ' + sig.score);
+    return;
+  }
+  if (sig.score >= App.bot.minScore) {
+    App.bot.lastEntryCandle = candleTime;
+    LS.set('botcfg', App.bot);
+    botBuy('AI signal ' + sig.score + ' (' + sig.label + ')');
+  }
+}
+
+/* ================= Settings ================= */
+function openSettings() {
+  $('apiKey').value = App.api.key || '';
+  $('apiSecret').value = App.api.secret || '';
+  $('apiBase').value = App.api.base || 'https://api.binance.com';
+  $('apiTestResult').textContent = '';
+  $('setModal').classList.add('open');
+}
+function closeSettings() { $('setModal').classList.remove('open'); }
+
+function saveSettings() {
+  App.api.key = $('apiKey').value.trim();
+  App.api.secret = $('apiSecret').value.trim();
+  App.api.base = $('apiBase').value;
+  LS.set('api', App.api);
+  if (App.api.base.includes('testnet')) { App.mode = 'testnet'; LS.set('mode', 'testnet'); }
+  renderBalance();
+  toast('💾 Settings saved');
+  closeSettings();
+}
+
+async function testApi() {
+  const key = $('apiKey').value.trim(), secret = $('apiSecret').value.trim();
+  const base = $('apiBase').value;
+  const out = $('apiTestResult');
+  if (!key || !secret) { out.innerHTML = '<span class="warn">Key + Secret දෙකම දාන්න</span>'; return; }
+  out.textContent = '⏳ Testing…';
+  // temporarily use entered values
+  const old = { key: App.api.key, secret: App.api.secret, base: App.api.base };
+  App.api.key = key; App.api.secret = secret; App.api.base = base;
+  try {
+    await syncTime();
+    const acc = await signedRequest('GET', '/api/v3/account', {});
+    const n = (acc.balances || []).filter(b => +b.free > 0).length;
+    out.innerHTML = '✅ <b>Connected!</b> ' + n + ' assets with balance. Account can trade.';
+    saveSettingsSilent(key, secret, base);
+  } catch (e) {
+    out.innerHTML = '❌ <span class="warn">' + e.message + '</span>';
+    App.api.key = old.key; App.api.secret = old.secret; App.api.base = old.base;
+  }
+}
+function saveSettingsSilent(k, s, b) { App.api.key = k; App.api.secret = s; App.api.base = b; LS.set('api', App.api); }
+
+/* ================= Symbol picker ================= */
+function openSymPicker() { $('symModal').classList.add('open'); renderSymGrid(); }
+function closeSymPicker() { $('symModal').classList.remove('open'); }
+function renderSymGrid() {
+  const q = ($('symSearch').value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const list = SYMBOLS.filter(s => !q || s.includes(q)).slice(0, 24);
+  $('symGrid').innerHTML = list.map(s => {
+    const sym = s + 'USDT';
+    return '<div class="sym-cell' + (sym === App.symbol ? ' active' : '') + '" onclick="pickSymbol(\'' + sym + '\')">' + s + '</div>';
+  }).join('') || '<div class="muted" style="grid-column:1/-1;font-size:12px">Pair එකක් හම්බු නෑ</div>';
+}
+function pickSymbol(sym) {
+  App.symbol = sym; LS.set('symbol', sym);
+  $('symBtn').textContent = sym.replace('USDT', '/USDT') + ' ▾';
+  closeSymPicker();
+  App.candles = []; App.lastSigLabel = null; App.exch = null;
+  loadCandles().then(wsConnect);
+}
+
+/* ================= Tabs & misc ================= */
+function switchSec(btn) {
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  $(btn.dataset.sec).classList.add('active');
+  if (App.chart) setTimeout(() => App.chart.applyOptions({ width: $('chartWrap').clientWidth }), 60);
+}
+
+function resetPaper() {
+  if (!confirm('Paper account reset කරන්නද? ($10,000)')) return;
+  App.paper = { usdt: 10000, position: null };
+  LS.set('paper', App.paper);
+  renderAll();
+  toast('↺ Paper account reset');
+}
+
+document.querySelectorAll('.tf').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tf').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    App.interval = btn.dataset.tf;
+    LS.set('interval', App.interval);
+    loadCandles().then(wsConnect);
+  });
+});
+
+/* ================= Boot ================= */
+window.addEventListener('error', (e) => { /* keep app alive */ });
+(function boot() {
+  $('symBtn').textContent = App.symbol.replace('USDT', '/USDT') + ' ▾';
+  $('botPct').value = App.bot.pct; $('botPctVal').textContent = App.bot.pct + '%';
+  $('botTp').value = App.bot.tp; $('botSl').value = App.bot.sl; $('botMin').value = App.bot.minScore;
+  if (App.bot.on) { $('botBtn').textContent = '⏸ STOP BOT'; $('botBtn').className = 'btn btn-stop'; }
+  setModeUiOnly();
+  initChart();
+  renderAll();
+  syncTime();
+  loadCandles().then(wsConnect);
+  setInterval(syncTime, 5 * 60 * 1000);
+  // periodic signal refresh (catch-all every 30s)
+  setInterval(() => { if (App.candles.length >= 60 && document.visibilityState !== 'hidden') computeAndRenderSignal(); }, 30000);
+})();
+
+function setModeUiOnly() {
+  document.querySelectorAll('.mode').forEach(el => el.classList.toggle('active', el.dataset.mode === App.mode));
+  $('modeNote').innerHTML = App.mode === 'paper'
+    ? '🟢 <b>Paper mode:</b> virtual $10,000 — real market data, fake money. 100% safe.'
+    : App.mode === 'testnet'
+      ? '🟡 <b>Testnet mode:</b> testnet.binance.vision fake funds — API keys ඕන (⚙️ Settings බලන්න).'
+      : '🔴 <b>LIVE MODE:</b> REAL MONEY! Trade size පොඩිවට තියාගන්න. TP/SL හැමවෙලාවෙම check කරන්න.';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Android build outputs
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+
+# keep CI-built apk (apk/RS-TradingAI.apk is committed by Actions on purpose)
