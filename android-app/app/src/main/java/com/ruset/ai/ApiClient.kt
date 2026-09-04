@@ -145,7 +145,8 @@ object ApiClient {
             var provider = ""
             var imageUrl: String? = null
             var sources: List<SourceItem>? = null
-            val source = resp.body.source()
+            val body = resp.body ?: throw IllegalStateException("empty response body")
+            val source = body.source()
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
                 if (!line.startsWith("data:")) continue
