@@ -30,14 +30,22 @@ jobs:
 
       - name: Smoke test server (with the bundled demo checkpoint)
         run: |
-          pip install --quiet fastapi "uvicorn[standard]" sentencepiece requests "torch==2.2.2" \
-            --index-url https://download.pytorch.org/whl/cpu \
-            --extra-index-url https://pypi.org/simple
-          RS_FORCE_CPU=1 python -m uvicorn server.main:app --host 127.0.0.1 --port 8123 &
-          sleep 12
-          curl -sf http://127.0.0.1:8123/health
+          pip install --quiet torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet fastapi "uvicorn[standard]" sentencepiece requests numpy
+          RS_FORCE_CPU=1 nohup python -m uvicorn server.main:app --host 127.0.0.1 --port 8123 >/tmp/rs.log 2>&1 &
+          ok=""
+          for i in $(seq 1 90); do
+            sleep 2
+            if curl -sf http://127.0.0.1:8123/health; then ok=1; break; fi
+          done
+          echo
+          if [ -z "$ok" ]; then echo "---- server log ----"; cat /tmp/rs.log; exit 1; fi
           curl -sf -X POST http://127.0.0.1:8123/chat \
             -H "Content-Type: application/json" \
             -d '{"message": "hello", "history": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello!"}], "max_tokens": 20}'
+          echo
           curl -sf "http://127.0.0.1:8123/ask?q=test"
+          echo
+          curl -sf http://127.0.0.1:8123/v1/models
+          echo
           echo "smoke test OK"
