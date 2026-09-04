@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Syntax-check all python files
         run: python -m compileall -q server model train eval && echo "syntax OK"
@@ -31,7 +31,7 @@ jobs:
       - name: Smoke test server (with the bundled demo checkpoint)
         run: |
           pip install --quiet torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
-          pip install --quiet fastapi "uvicorn[standard]" sentencepiece requests numpy
+          pip install --quiet fastapi "uvicorn[standard]" sentencepiece requests "numpy<2"
           RS_FORCE_CPU=1 nohup python -m uvicorn server.main:app --host 127.0.0.1 --port 8123 >/tmp/rs.log 2>&1 &
           ok=""
           for i in $(seq 1 90); do
