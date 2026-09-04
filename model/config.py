@@ -1,6 +1,9 @@
 """Predefined model sizes for RS-GPT."""
 
-from gpt import GPTConfig
+try:  # used as a package:  from model.config import CONFIGS
+    from .gpt import GPTConfig
+except ImportError:  # used as scripts inside model/:  python train.py
+    from gpt import GPTConfig
 
 # Parameter counts (approx., vocab=32000 unless noted):
 CONFIGS = {
