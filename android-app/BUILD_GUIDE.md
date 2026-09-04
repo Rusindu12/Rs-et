@@ -3,11 +3,14 @@
 Android app එක: Kotlin + Jetpack Compose + Retrofit. RS AI server එකට
 සම්බන්ධ වෙලා chat කරනවා.
 
-## විකල්ප 0: GitHub Actions එකෙන් auto APK (ලේසි — computer එකෙන්ම නැතුව!)
+## ⬇️ APK එක කෙලින් download (අලුත් build එකම!)
 
-මේ repo එකට workflow එකක් තියෙනවා (`.github/workflows/android.yml`): push ගානකම
-GitHub එකේම **APK build** වෙලා **Actions tab → RS-AI-debug-apk** artifact එකෙන් download.
-Debug-signed — install කරන්න readyම.
+**👉 [RS-AI.apk — download](https://github.com/Rusindu12/Rs-et/releases/download/apk-latest/RS-AI.apk)**
+(Release page: https://github.com/Rusindu12/Rs-et/releases/tag/apk-latest — push එකක් හැමයිම auto-update ✅)
+
+Debug-signed — install කරන්න readyම; "unknown sources" warning එක normal (Play Store එකෙන් නෙවේ නිසා).
+
+<small>Old way: Actions tab → ඕනම successful run එක → **RS-AI-debug-apk** artifact (days 90ට expire).</small>
 
 ## විකල්ප 1: Android Studio (පහසුම — විනාඩි 5)
 
