@@ -9,6 +9,8 @@
   var BASE = new URL(script.src).origin;
   var TOKEN = script.dataset.token || '';
   var MODE = script.dataset.mode || 'chat';
+  var SYSTEM = script.dataset.system || '';   // optional custom persona
+  var chatLog = [];                           // conversation memory turns
   var SIDE = script.dataset.side === 'left' ? 'left' : 'right';
 
   var css = `
@@ -105,7 +107,11 @@
     fetch(BASE + '/chat', {
       method: 'POST',
       headers: headers,
-      body: JSON.stringify({ message: text, mode: MODE })
+      body: JSON.stringify({
+        message: text, mode: MODE,
+        history: chatLog.slice(-10),
+        system: SYSTEM || undefined
+      })
     })
       .then(function (r) {
         if (r.status === 401) throw new Error('API token වැරදියි (data-token)');
@@ -114,6 +120,8 @@
       .then(function (j) {
         t.remove();
         add(j.reply || '…', 'bot', j.image_url || null);
+        chatLog.push({ role: 'user', content: text });
+        chatLog.push({ role: 'assistant', content: j.reply || '…' });
       })
       .catch(function (e) {
         t.remove();

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognizerIntent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -14,8 +15,10 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,8 +69,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -224,9 +229,12 @@ fun AttachmentRow(vm: ChatViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(msg: ChatMessage) {
     val uriHandler = LocalUriHandler.current
+    val clipboard = LocalClipboardManager.current
+    val ctx = LocalContext.current
     Box(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         contentAlignment = if (msg.isUser) Alignment.CenterEnd else Alignment.CenterStart
@@ -243,7 +251,14 @@ fun MessageBubble(msg: ChatMessage) {
         } else {
             Surface(
                 color = BubbleBot,
-                shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp)
+                shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp),
+                modifier = Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        clipboard.setText(AnnotatedString(msg.text))
+                        Toast.makeText(ctx, "📋 copied!", Toast.LENGTH_SHORT).show()
+                    }
+                )
             ) {
                 Column(Modifier.widthIn(max = 300.dp).padding(horizontal = 14.dp, vertical = 11.dp)) {
                     if (msg.text.isNotBlank()) {
@@ -410,10 +425,12 @@ fun InputBar(vm: ChatViewModel) {
                 contentAlignment = Alignment.Center
             ) {
                 IconButton(
-                    onClick = { vm.send(text); text = "" },
-                    enabled = (text.isNotBlank() || vm.attachments.isNotEmpty()) && !vm.isTyping
+                    onClick = {
+                        if (vm.isTyping) vm.stopGeneration() else { vm.send(text); text = "" }
+                    },
+                    enabled = (text.isNotBlank() || vm.attachments.isNotEmpty() || vm.isTyping)
                 ) {
-                    Text("➤", color = Color.White, fontSize = 17.sp)
+                    Text(if (vm.isTyping) "⏹" else "➤", color = Color.White, fontSize = 17.sp)
                 }
             }
         }

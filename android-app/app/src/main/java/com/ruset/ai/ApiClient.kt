@@ -1,6 +1,13 @@
 package com.ruset.ai
 
+import com.google.gson.Gson
+import com.google.gson.JsonParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -93,4 +100,81 @@ object ApiClient {
             ),
             if (token.isBlank()) null else "Bearer $token"
         )
+
+    // ------------------------------------------------------------------ //
+    // SSE streaming (RS format): data: {"delta": ...} then {"done": ...,  //
+    // provider, image_url?, sources?} — callbacks marshaled to Main.      //
+    // ------------------------------------------------------------------ //
+
+    private val gson = Gson()
+
+    /** Build the streaming call (caller keeps it => can call Call.cancel()). */
+    fun buildStreamCall(
+        base: String,
+        message: String,
+        token: String = "",
+        mode: String = "chat",
+        attachments: List<Attachment>? = null,
+        history: List<HistoryMsg>? = null,
+    ): okhttp3.Call {
+        val payload = mapOf(
+            "message" to message,
+            "mode" to mode,
+            "stream" to true,
+            "attachments" to attachments,
+            "history" to history,
+        )
+        val body = gson.toJson(payload)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        val reqBuilder = Request.Builder()
+            .url(base.trim().trimEnd('/') + "/chat")
+            .post(body)
+        if (token.isNotBlank()) reqBuilder.header("Authorization", "Bearer $token")
+        return client.newCall(reqBuilder.build())
+    }
+
+    /** Execute a streaming call; onDelta gets the accumulated text on Main. */
+    suspend fun consumeStream(
+        call: okhttp3.Call,
+        onDelta: (String) -> Unit,
+    ): ChatResponse = withContext(Dispatchers.IO) {
+        call.execute().use { resp ->
+            if (resp.code == 401) throw IllegalStateException("401: API token වැරදියි")
+            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            val acc = StringBuilder()
+            var provider = ""
+            var imageUrl: String? = null
+            var sources: List<SourceItem>? = null
+            val source = resp.body.source()
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (!line.startsWith("data:")) continue
+                val payloadStr = line.substring(5).trim()
+                if (payloadStr.isEmpty()) continue
+                val j = try {
+                    JsonParser.parseString(payloadStr).asJsonObject
+                } catch (e: Exception) {
+                    continue
+                }
+                if (j.has("delta")) {
+                    acc.append(j.get("delta").asString)
+                    withContext(Dispatchers.Main) { onDelta(acc.toString()) }
+                } else if (j.has("done") && j.get("done").asBoolean) {
+                    provider = if (j.has("provider")) j.get("provider").asString else ""
+                    imageUrl = if (j.has("image_url")) j.get("image_url").asString else null
+                    sources = if (j.has("sources")) {
+                        try {
+                            gson.fromJson(j.get("sources"), Array<SourceItem>::class.java).toList()
+                        } catch (e: Exception) { null }
+                    } else null
+                }
+            }
+            ChatResponse(
+                reply = acc.toString(),
+                provider = provider,
+                image_url = imageUrl,
+                sources = sources,
+            )
+        }
+    }
 }

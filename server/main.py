@@ -267,7 +267,8 @@ def smart_reply(message, mode, atts, max_tokens, temperature, history=None, syst
     return {"reply": prefix + "⚠️ සියලුම providers අසාර්ථකයි.", "provider": "none", "mode": mode}
 
 
-def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=None):
+def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=None,
+                       system=None):
     """Yields (delta_text, provider_name, meta|None) triples for SSE streaming.
 
     chat/think stream token-by-token; research/image yield one final block
@@ -282,7 +283,7 @@ def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=Non
     if mode in ("research", "image"):
         # non-streaming by nature — emit final result as one delta
         result = smart_reply(message, mode, atts, max_tokens, temperature,
-                             history=hist)
+                             history=hist, system=system)
         text = result["reply"][len(prefix):] if result["reply"].startswith(prefix) else result["reply"]
         meta = {k: result[k] for k in ("image_url", "sources") if result.get(k)}
         yield text, result["provider"], (meta or None)
@@ -305,7 +306,7 @@ def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=Non
                     yield delta, p.name, None
             else:
                 tm = think_model_for(p) if want_think else None
-                sys_p = THINK_PROMPT if want_think else None
+                sys_p = THINK_PROMPT if want_think else system
                 pkey = f"{p.key}/{tm}" if want_think else p.name
                 for delta in p.chat_stream(full_msg, mt, temp, system=sys_p,
                                            attachments=images or None, model_override=tm,
@@ -407,6 +408,7 @@ class ChatRequest(BaseModel):
     mode: str = "chat"          # chat | think | think_harder | research | image
     attachments: list[Attachment] = []
     history: list[HistoryMsg] = []   # conversation memory (recent turns)
+    system: str | None = None        # custom persona (Redis apps/widget)
     max_tokens: int = 400
     temperature: float = 0.8
     top_p: float = 0.9
@@ -436,11 +438,11 @@ def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
     if req.stream:
         gen = smart_reply_stream(req.message, mode, req.attachments,
                                  req.max_tokens, req.temperature,
-                                 history=[h.model_dump() for h in req.history])
+                                 history=[h.model_dump() for h in req.history], system=req.system)
         return StreamingResponse(_rs_sse(gen), media_type="text/event-stream")
     t0 = time.time()
     result = smart_reply(req.message, mode, req.attachments, req.max_tokens, req.temperature,
-                         history=[h.model_dump() for h in req.history])
+                         history=[h.model_dump() for h in req.history], system=req.system)
     result["latency_ms"] = int((time.time() - t0) * 1000)
     return result
 
@@ -659,6 +661,7 @@ CHAT_HTML = r"""<!DOCTYPE html>
   <div class="mchip" data-m="research">🔬 Deep research</div>
   <div class="mchip" data-m="image">🎨 Create image</div>
   <div class="mchip spk" id="spk">🔊</div>
+  <div class="mchip" id="regen" title="Regenerate last answer">🔄</div>
 </div>
 <div class="attrow" id="atts"></div>
 <footer>
@@ -681,6 +684,9 @@ let atts = [];          // {name,kind,mime,data_b64}
 let speakOn = false;
 let convo = [];         // conversation memory [{role, content}]
 let aborter = null;     // AbortController while streaming
+function saveConvo() {
+  try { localStorage.setItem('rsai_conv', JSON.stringify(convo.slice(-40))); } catch (e) {}
+}
 
 inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
@@ -698,7 +704,7 @@ function authHeaders() {
 // mode chips
 document.getElementById('modes').addEventListener('click', e => {
   const c = e.target.closest('.mchip');
-  if (!c || c.id === 'spk') return;
+  if (!c || c.id === 'spk' || c.id === 'regen') return;
   document.querySelectorAll('#modes .mchip').forEach(x => x.classList.remove('on'));
   c.classList.add('on');
   mode = c.dataset.m;
@@ -822,6 +828,7 @@ async function send() {
                     history: convo.slice(-10), stream: true };
   atts = []; renderAtts();
   convo.push({ role: 'user', content: text || '(attachment)' });
+  saveConvo();
   sendBtn.textContent = '⏹';
   aborter = new AbortController();
   const t = typingBubble();
@@ -882,12 +889,14 @@ async function send() {
       bubble.appendChild(sDiv);
     }
     convo.push({ role: 'assistant', content: acc });
+    saveConvo();
     speak(acc);
   } catch (e) {
     t.remove();
     if (!bubble && !acc) add('⚠️ දෝෂයක්: ' + e.message, 'bot');
     else if (acc && bubble) bubble.textContent = acc + '\n\n⏹';
     convo.push({ role: 'assistant', content: acc || '…' });
+    saveConvo();
   }
   aborter = null;
   sendBtn.textContent = '➤';
@@ -904,10 +913,40 @@ document.getElementById('exp').onclick = () => {
 };
 document.getElementById('clr').onclick = () => {
   convo = [];
+  saveConvo();
   chat.innerHTML = '';
   add('ආයුබෝවන්! 👋 මම <b>RS AI</b>. අලුතෙන් පටන් ගමු!', 'bot');
 };
 
+
+// 🔄 regenerate: drop last exchange, rebuild, resend
+function rebuildConvoDom() {
+  chat.innerHTML = '';
+  convo.forEach(m => add(m.content, m.role === 'user' ? 'user' : 'bot'));
+}
+document.getElementById('regen').onclick = () => {
+  if (aborter) return;
+  let i = convo.length - 1;
+  while (i >= 0 && convo[i].role === 'assistant') i--;
+  if (i < 0) { add('ආයේ හදන්න කිසිම පන්හිදන message එකක් නෑ 🙂', 'bot'); return; }
+  const lastUser = convo[i].content;
+  convo = convo.slice(0, i);   // user turn will be re-added by send()
+  saveConvo();
+  rebuildConvoDom();
+  inp.value = lastUser.startsWith('(attachment') ? '' : lastUser;
+  if (lastUser.startsWith('(attachment')) { add('📎 attachments වලට regenerate නෑ — text එක ආයේ යවන්න', 'bot'); return; }
+  send();
+};
+
+// 💾 restore previous chat from localStorage
+try {
+  const saved = JSON.parse(localStorage.getItem('rsai_conv') || '[]');
+  if (saved.length) {
+    convo = saved;
+    rebuildConvoDom();
+    chat.scrollTop = chat.scrollHeight;
+  }
+} catch (e) {}
 </script>
 </body>
 </html>

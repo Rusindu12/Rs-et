@@ -91,6 +91,8 @@ RS AI context මතක තියාගනියයි. Server-side stateless �
 
 නිල/ demo: `https://your-host/widget-demo` — floating 🤖 bubble එකක් ඕනම site එකක.
 Token: `<script src="..." data-token="RS_API_TOKEN"></script>`
+Options: `data-mode` (chat/think/...), `data-system` (custom persona prompt) —
+widget එකටත් history memory + system persona ✅
 
 ## ⚡ Easy GET (Shortcuts/Tasker/browsers)
 

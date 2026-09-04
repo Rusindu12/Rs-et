@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,6 +34,18 @@ data class PendingAttachment(
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("rsai_prefs", Context.MODE_PRIVATE)
+    private val gson = Gson()
+    private var activeCall: okhttp3.Call? = null
+
+    fun stopGeneration() {
+        activeCall?.cancel()
+    }
+
+    private fun persistChat() {
+        try {
+            prefs.edit().putString("chat_history", gson.toJson(messages.takeLast(40))).apply()
+        } catch (e: Exception) { /* storage hiccup — non-fatal */ }
+    }
 
     var serverUrl by mutableStateOf(prefs.getString("server_url", DEFAULT_URL) ?: DEFAULT_URL)
         private set
@@ -42,11 +55,26 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val messages = mutableStateListOf(
         ChatMessage("ආයුබෝවන්! 👋 මම RS AI. උඩ mode එකක් තෝරන්න — chat, thinking, research, image 🎨. Photos/files attach කරන්නත්, 🎙️ voice වලින් අහන්නත් පුළුවන්!", false)
     )
+
+    init {
+        // 💾 restore previous chat (survives app restarts)
+        val saved = prefs.getString("chat_history", null)
+        if (!saved.isNullOrBlank()) {
+            try {
+                val arr = gson.fromJson(saved, Array<ChatMessage>::class.java)
+                if (!arr.isNullOrEmpty()) {
+                    messages.clear()
+                    messages.addAll(arr.toList())
+                }
+            } catch (e: Exception) { /* corrupted save — ignore */ }
+        }
+    }
     val attachments = mutableStateListOf<PendingAttachment>()
 
     fun clearChat() {
         attachments.clear()
         messages.clear()
+        persistChat()
         messages.add(
             ChatMessage("ආයුබෝවන්! 👋 අලුතෙන් පටන් ගමු — මම RS AI 🤖", false)
         )
@@ -145,11 +173,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 isUser = true
             )
         )
+        persistChat()
         isTyping = true
+        val botIdx = messages.size
+        messages.add(ChatMessage("", false))   // streaming placeholder bubble
 
         viewModelScope.launch {
             try {
-                val r = ApiClient.chat(
+                val call = ApiClient.buildStreamCall(
                     serverUrl,
                     msg.ifEmpty { "(attachment)" },
                     apiToken,
@@ -157,16 +188,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     atts.map { Attachment(it.name, it.kind, it.mime, it.dataB64) },
                     history
                 )
-                messages.add(ChatMessage(r.reply, false, r.image_url, r.sources))
+                activeCall = call
+                val r = ApiClient.consumeStream(call) { acc ->
+                    if (botIdx < messages.size) {
+                        messages[botIdx] = ChatMessage(acc, false)
+                    }
+                }
+                if (botIdx < messages.size) {
+                    messages[botIdx] = ChatMessage(r.reply, false, r.image_url, r.sources)
+                }
+                persistChat()
             } catch (e: Exception) {
-                messages.add(
-                    ChatMessage(
-                        "⚠️ Server එකට සම්බන්ධ වෙන්න බැහැ. Settings ⚙️ වලින් URL/token බලන්න.\n($serverUrl)",
-                        isUser = false
-                    )
-                )
+                val partial = if (botIdx < messages.size) messages[botIdx].text else ""
+                val text = if (partial.isNotBlank()) {
+                    partial + "\n\n⏹ නවත්තලා"
+                } else {
+                    "⚠️ Server එකට සම්බන්ධ වෙන්න බැහැ. Settings ⚙️ වලින් URL/token බලන්න.\n" +
+                        (e.message ?: serverUrl)
+                }
+                if (botIdx < messages.size) messages[botIdx] = ChatMessage(text, false)
+                persistChat()
             } finally {
                 isTyping = false
+                activeCall = null
             }
         }
     }
