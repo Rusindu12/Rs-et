@@ -75,6 +75,13 @@ App/web UI mode chips — ChatGPT app එක වගේම:
 
 Plus: 📎 **files/photos/camera attachments** · 🎙️ **voice input (සිංහල)** · 🔊 **voice replies** — web UI ඉඳනේ.
 
+### 💸 Open-source & 100% FREE smart brain
+
+Key/account නැතුවම දැනවත්: chain **`pollinations/openai (free)`** — key-less open models
+auto-select → thinking/think-harder/research-synthesis **free**. (`RS_FREE_TEXT=0` to opt-out)
+Local open-source models ([Ollama](https://ollama.com) — llama3.2/qwen2.5, PC එකෙන්ම, private):
+`RS_PROVIDER=ollama`. මුදල් ගෙවීමක් කිසිසේත් නෑ.
+
 ## 🌍 Access from Anywhere
 
 RS AI server එක public කරලා **ඕනම device එකකින්** use කරන්න පුළුවන්:

@@ -46,6 +46,8 @@ THINK_MODELS = {
     "openai": "o4-mini",
     "openrouter": "deepseek/deepseek-r1",
     "deepseek": "deepseek-reasoner",
+    "pollinations": "openai",
+    "ollama": "qwen2.5:3b",
 }
 # default vision models per provider key (override with RS_MODEL_VISION)
 VISION_MODELS = {
@@ -53,6 +55,8 @@ VISION_MODELS = {
     "openai": "gpt-4o-mini",
     "openrouter": "openai/gpt-4o-mini",
     "deepseek": "deepseek-chat",
+    "pollinations": "openai",
+    "ollama": "qwen2.5:3b",
 }
 
 _MAX_HISTORY_CHARS = 4000   # per-turn cap before sending history to providers
@@ -118,6 +122,12 @@ class OpenAICompatibleProvider(Provider):
         self.model = model
         self.timeout = timeout
 
+    def _headers(self):
+        h = {"Content-Type": "application/json"}
+        if self.api_key:
+            h["Authorization"] = f"Bearer {self.api_key}"
+        return h
+
     def _payload(self, message, max_tokens, temperature, system, attachments,
                  model_override, history):
         model = model_override or self.model
@@ -140,10 +150,7 @@ class OpenAICompatibleProvider(Provider):
                                    attachments, model_override, history)
         r = requests.post(
             f"{self.base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=self._headers(),
             json=payload,
             timeout=self.timeout,
         )
@@ -158,10 +165,7 @@ class OpenAICompatibleProvider(Provider):
         payload["stream"] = True
         with requests.post(
             f"{self.base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=self._headers(),
             json=payload,
             timeout=self.timeout,
             stream=True,
@@ -185,10 +189,7 @@ class OpenAICompatibleProvider(Provider):
         """OpenAI images API (used when RS_IMAGE_MODEL is set)."""
         r = requests.post(
             f"{self.base_url}/images/generations",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=self._headers(),
             json={"model": model or "dall-e-3", "prompt": prompt, "n": 1,
                   "size": "1024x1024", "response_format": "url"},
             timeout=timeout,
@@ -357,6 +358,14 @@ def build_chain(local_reply_fn, mode=None):
         else:
             print("[providers] RS_PROVIDER=gemini but no API key -> local only")
 
+    elif mode == "pollinations":
+        external = TextPollinationsProvider(os.environ.get("RS_EXT_MODEL") or "openai")
+
+    elif mode == "ollama":
+        base = os.environ.get("RS_OLLAMA_URL", "http://localhost:11434/v1")
+        mdl = os.environ.get("RS_EXT_MODEL") or "qwen2.5:3b"
+        external = OpenAICompatibleProvider(f"ollama/{mdl}", base, "", mdl, key="ollama")
+
     elif mode == "custom":
         key = _find_key("RS_API_KEY")
         base = os.environ.get("RS_BASE_URL", "").strip()
@@ -384,6 +393,10 @@ def build_chain(local_reply_fn, mode=None):
             generic = _find_key("RS_API_KEY")
             if generic:
                 external = _openai_preset("groq", generic)
+        # 100% FREE key-less smart mode (open models hosted by pollinations.ai)
+        if external is None and os.environ.get("RS_FREE_TEXT", "1") != "0":
+            print("[providers] no API keys — using FREE key-less pollinations for smart modes")
+            external = TextPollinationsProvider(os.environ.get("RS_EXT_MODEL") or "openai")
 
     elif mode != "local":
         print(f"[providers] unknown RS_PROVIDER '{mode}' -> local only")
@@ -391,3 +404,44 @@ def build_chain(local_reply_fn, mode=None):
     chain = ([external, local] if external is not None else [local])
     print(f"[providers] chain: {' -> '.join(p.name for p in chain)}")
     return chain
+
+class TextPollinationsProvider(Provider):
+    """FREE key-less open-model chat — https://text.pollinations.ai (POST /, OpenAI-ish).
+
+    Zero config: no API key. Powers smart modes (think/research) for free when
+    no provider key is configured. Set RS_FREE_TEXT=0 to disable.
+    """
+
+    family = "openai"
+    key = "pollinations"
+
+    def __init__(self, model="openai", timeout=120):
+        self.name = f"pollinations/{model} (free)"
+        self.model = model
+        self.timeout = timeout
+
+    def chat(self, message, max_tokens=512, temperature=0.7, system=None,
+             attachments=None, model_override=None, history=None):
+        msgs = [{"role": "system", "content": system or SYSTEM_PROMPT}]
+        msgs.extend(clean_history(history))
+        msgs.append({"role": "user", "content": message})
+        r = requests.post(
+            "https://text.pollinations.ai/",
+            json={"messages": msgs, "model": model_override or self.model,
+                  "jsonMode": False},
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        return r.text.strip()
+
+    def chat_stream(self, message, max_tokens=512, temperature=0.7, system=None,
+                    attachments=None, model_override=None, history=None):
+        # Pollinations text API has no documented SSE; pseudo-stream the final
+        # text in small chunks so clients still get the typewriter UX.
+        text = self.chat(message, max_tokens, temperature, system,
+                         attachments, model_override, history)
+        step = 64
+        for i in range(0, len(text), step):
+            yield text[i:i + step]
+
+

@@ -17,6 +17,8 @@ Server එකේ built-in:
 > `notebooks/RS_AI_Colab.ipynb` — deps → clone → (optional Groq smart key) → server + Cloudflare public URL.
 >
 > 🔧 **Live debug tip:** deploy වෙලා ඉන්න ඕනම server එකක් — `https://your-host/diagnose` (per-provider status, latency, keys masked, GPU/device/torch/python).
+>
+> 💸 **No keys? No wallet?** — smart modes still FREE: chain auto-uses **key-less pollinations** (open models) for 💡🧠🔬 — zero setup. Open-source local: [ollama.com](https://ollama.com) models via `RS_PROVIDER=ollama`. මුදල් ගෙවීම කිසිසේත් නෑ.
 
 ### 🥇 Hugging Face Spaces (recommended — free, always-on)
 

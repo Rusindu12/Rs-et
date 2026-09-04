@@ -71,6 +71,21 @@ python server/main.py
 
 ## Behavior
 
+## 💸 100% FREE smart mode (no payment, no account!)
+
+API key එකක් configure නැත්නම් chain auto වෙනුවෙන්:
+**`pollinations/openai (free)`** — key-less open models (free, https://pollinations.ai)
+→ 💡 thinking, 🧠 think harder, 🔬 research synthesis ඔක්කොම **free** වැඩ!
+(sandbox-less networks; CI-verified live smoke test)
+
+| FREE option | Setup | Notes |
+|---|---|---|
+| 🆓 **pollinations** (default fallback) | nothing! | key-less; `RS_FREE_TEXT=0` to disable |
+| 🆓 **ollama** (local open models) | `RS_PROVIDER=ollama` + [ollama.com](https://ollama.com) | qwen2.5/llama3.2, PC එකෙන්ම, private |
+| 🆓 **Groq/Gemini free tier key** | `server/.env` | fastest quality; free account |
+
+උදා: `docker run -e RS_PROVIDER=ollama -e RS_EXT_MODEL=llama3.2 ...`
+
 ## 🎛️ Smart Modes (app/web UI mode chips)
 
 | Mode | කොහොමද වැඩ කරන්නේ | Needs |
