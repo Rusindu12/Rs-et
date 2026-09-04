@@ -63,7 +63,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         "image" to "🎨 Image"
     )
 
-    fun setServerUrl(url: String) {
+    fun updateServerUrl(url: String) {
         val clean = url.trim().trimEnd('/')
         if (clean.isNotEmpty()) {
             serverUrl = clean
@@ -71,7 +71,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setApiToken(token: String) {
+    fun updateApiToken(token: String) {
         apiToken = token.trim()
         prefs.edit().putString("api_token", apiToken).apply()
     }

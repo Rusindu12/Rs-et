@@ -80,7 +80,12 @@ model.to(DEVICE)
 model.eval()
 torch.set_num_threads(max(1, os.cpu_count() or 1))
 
-sp_path = TOKENIZER or ckpt.get("tokenizer")
+# tokenizer: env override -> checkpoint record -> repo-local fallback
+# (checkpoints may store an absolute path from the machine they trained on)
+_sp_cands = [TOKENIZER, ckpt.get("tokenizer"),
+             str(ROOT / "model" / "tokenizer" / "rs_sp.model")]
+sp_path = next((c for c in _sp_cands if c and Path(c).exists()), None)
+assert sp_path, f"tokenizer not found in {_sp_cands}"
 sp = spm.SentencePieceProcessor(model_file=sp_path)
 EOS_ID = sp.piece_to_id("<|end|>")
 N_PARAMS = model.num_params()

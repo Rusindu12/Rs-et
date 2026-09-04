@@ -479,8 +479,8 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = {
-                vm.setServerUrl(url)
-                vm.setApiToken(token)
+                vm.updateServerUrl(url)
+                vm.updateApiToken(token)
                 onDismiss()
             }) {
                 Text("Save", color = Lavender, fontWeight = FontWeight.Bold)
