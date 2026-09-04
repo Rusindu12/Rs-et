@@ -8,15 +8,32 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 
+data class Attachment(
+    val name: String,
+    val kind: String = "file",      // "image" | "file"
+    val mime: String = "text/plain",
+    val data_b64: String
+)
+
 data class ChatRequest(
     val message: String,
-    val max_tokens: Int = 200,
+    val mode: String = "chat",
+    val attachments: List<Attachment>? = null,
+    val max_tokens: Int = 400,
     val temperature: Double = 0.8
+)
+
+data class SourceItem(
+    val title: String = "",
+    val url: String = ""
 )
 
 data class ChatResponse(
     val reply: String,
-    val latency_ms: Int = 0
+    val latency_ms: Int = 0,
+    val provider: String = "",
+    val image_url: String? = null,
+    val sources: List<SourceItem>? = null
 )
 
 interface RsAiApi {
@@ -31,8 +48,8 @@ object ApiClient {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)   // CPU inference can be slow
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(300, TimeUnit.SECONDS)   // deep research / think can take a while
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private var cachedBase: String? = null
@@ -53,9 +70,15 @@ object ApiClient {
         return cachedApi!!
     }
 
-    suspend fun chat(base: String, message: String, token: String = ""): String =
+    suspend fun chat(
+        base: String,
+        message: String,
+        token: String = "",
+        mode: String = "chat",
+        attachments: List<Attachment>? = null
+    ): ChatResponse =
         api(base).chat(
-            ChatRequest(message),
+            ChatRequest(message, mode, if (attachments.isNullOrEmpty()) null else attachments),
             if (token.isBlank()) null else "Bearer $token"
-        ).reply
+        )
 }

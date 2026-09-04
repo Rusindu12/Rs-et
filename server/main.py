@@ -1,23 +1,22 @@
 """
-RS AI — FastAPI inference server.
+RS AI — FastAPI inference server with SMART MODES.
 
-Replies come from a provider chain (see providers.py):
-  1. an external AI service if configured (Groq/OpenAI/Gemini/custom)
-  2. the local RS-GPT model as fallback — always available
+Modes (client selectable): chat | think | think_harder | research | image
+  💬 chat          -> provider chain (text + 📷 image attachments for vision models)
+  💡 think         -> reasoning model (DeepSeek-R1 / o4-mini / ...) via RS_MODEL_THINK
+  🧠 think_harder  -> same, more tokens + lower temperature
+  🔬 research      -> multi-step web research with sources (research.py)
+  🎨 image         -> image generation (OpenAI images API or free key-less service)
 
 Run:
     pip install -r requirements.txt
     python server/main.py
-    RS_PROVIDER=groq RS_API_KEY=gsk_... python server/main.py
-
-Endpoints:
-    GET  /                      -> web chat UI
-    GET  /health                -> model + provider info
-    POST /chat                  -> {"message": ..., "max_tokens": ..., "temperature": ...}
-    POST /v1/chat/completions   -> OpenAI-compatible endpoint
 """
 
+import base64
+import io
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -30,27 +29,26 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# repo root on path so "model" package is importable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from model.gpt import GPT, GPTConfig  # noqa: E402
 
-try:  # run as package (uvicorn server.main:app)
-    from .providers import build_chain
-except ImportError:  # run as script (python server/main.py)
-    from providers import build_chain
+try:
+    from . import research
+    from .providers import build_chain, generate_image, think_model_for, THINK_PROMPT
+except ImportError:
+    import research
+    from providers import build_chain, generate_image, think_model_for, THINK_PROMPT
 
 CKPT = os.environ.get("RS_CKPT", str(ROOT / "model" / "runs" / "demo" / "ckpt.pt"))
 TOKENIZER = os.environ.get("RS_TOKENIZER", None)
 MAX_TOKENS_CAP = 512
+MODES = ["chat", "think", "think_harder", "research", "image"]
 
 
 def _load_dotenv():
-    """Minimal .env loader (no dependency): KEY=VALUE lines, '#' comments.
-
-    Put your API key in server/.env (git-ignored) and just run the server —
-    smart mode activates automatically."""
+    """Minimal .env loader (no dependency): KEY=VALUE lines, '#' comments."""
     candidates = (Path(__file__).resolve().parent / ".env", ROOT / ".env")
     for cand in candidates:
         if cand.exists():
@@ -99,45 +97,149 @@ def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8) -
     return text.strip() or "…"
 
 
-# --------------------------------------------------------------------------- #
-# Provider chain (external AI first if configured, local as fallback)
-# --------------------------------------------------------------------------- #
-
 CHAIN = build_chain(local_reply)
 
+# --------------------------------------------------------------------------- #
+# Attachment handling
+# --------------------------------------------------------------------------- #
 
-def smart_reply(message: str, max_tokens: int, temperature: float):
-    """Try providers in order; return (reply, provider_name)."""
-    last_err = None
+TEXT_EXT = (".txt", ".md", ".json", ".csv", ".log", ".py", ".js", ".ts", ".html",
+            ".css", ".xml", ".yaml", ".yml", ".ini", ".toml", ".sh", ".java",
+            ".kt", ".c", ".cpp", ".h", ".go", ".rs", ".sql")
+
+
+def prepare_attachments(atts):
+    """Split into (merged_text_parts, images, notes). Caps: 3 files, 4 MB b64 each."""
+    parts, images, notes = [], [], []
+    for a in (atts or [])[:3]:
+        b64 = a.data_b64 or ""
+        if len(b64) > 4_200_000:
+            notes.append(f"⚠️ '{a.name}' ලොකු වැඩියි (max ~3MB)")
+            continue
+        if a.kind == "image":
+            images.append({"kind": "image", "mime": a.mime, "data_b64": b64})
+            continue
+        raw = b""
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            pass
+        txt = ""
+        if a.name.lower().endswith(".pdf"):
+            try:
+                from pypdf import PdfReader  # optional dep
+                reader = PdfReader(io.BytesIO(raw))
+                txt = "\n".join((p.extract_text() or "") for p in reader.pages[:8])
+            except Exception:
+                notes.append(f"⚠️ '{a.name}' PDF කියවන්න බැරි වුණා")
+        else:
+            try:
+                txt = raw.decode("utf-8", errors="replace")
+            except Exception:
+                txt = ""
+        if txt.strip():
+            parts.append(f"[📎 file: {a.name}]\n{txt[:6000]}")
+        else:
+            notes.append(f"⚠️ '{a.name}' text extract කරන්න බැරි වුණා")
+    if atts and len(atts) > 3:
+        notes.append("⚠️ files 3කට වඩා නොගත්තා")
+    return parts, images, notes
+
+
+# --------------------------------------------------------------------------- #
+# Mode-aware reply engine
+# --------------------------------------------------------------------------- #
+
+def _notes_block(notes):
+    return ("\n".join(notes) + "\n\n") if notes else ""
+
+
+def smart_reply(message, mode, atts, max_tokens, temperature):
+    parts, images, notes = prepare_attachments(atts)
+    full_msg = ("\n\n".join(parts + [message])) if parts else message
+    prefix = _notes_block(notes)
+
+    # 🎨 IMAGE
+    if mode == "image":
+        prompt = message.strip() or "beautiful sri lankan landscape, digital art"
+        reply, url, prov = generate_image(prompt, CHAIN)
+        return {"reply": prefix + reply, "provider": prov, "image_url": url, "mode": mode}
+
+    # 🔬 DEEP RESEARCH
+    if mode == "research":
+        reply, sources, prov = research.run_research(CHAIN, full_msg)
+        if reply is None:
+            fb = local_reply(full_msg, min(max_tokens, 300), temperature)
+            return {
+                "reply": prefix + "🔬 Web research එකට smart mode (Groq/Gemini key) + internet ඕන. Local model එකෙන්:\n\n" + fb,
+                "provider": "rs-gpt-local", "mode": mode,
+                "sources": sources or None,
+            }
+        return {"reply": prefix + reply, "provider": prov, "sources": sources, "mode": mode}
+
+    # 💡🧠 THINK / THINK HARDER
+    if mode in ("think", "think_harder"):
+        harder = mode == "think_harder"
+        want_tokens = min(int(max_tokens * (2.5 if harder else 1.5)), 2000)
+        want_temp = 0.5 if harder else 0.6
+        for p in CHAIN:
+            try:
+                if p.family == "local":
+                    note = ("💡 Thinking modes වලට smart mode ඕන "
+                            "(Groq free key → server/.env). Local උත්තරය:\n\n")
+                    return {"reply": prefix + note + p.chat(full_msg, max_tokens, temperature),
+                            "provider": p.name, "mode": mode}
+                tm = think_model_for(p)
+                reply = p.chat(full_msg, want_tokens, want_temp,
+                               system=THINK_PROMPT, model_override=tm)
+                return {"reply": prefix + reply, "provider": f"{p.key}/{tm}", "mode": mode}
+            except Exception as e:  # noqa: BLE001
+                print(f"[modes] think via {p.name} failed: {e!r}")
+        return {"reply": prefix + "⚠️ providers අසාර්ථකයි.", "provider": "none", "mode": mode}
+
+    # 💬 CHAT (normal) — attachments: images need a vision-capable external provider
+    img_note = ""
     for p in CHAIN:
         try:
-            return p.chat(message, max_tokens=max_tokens, temperature=temperature), p.name
-        except Exception as e:  # noqa: BLE001 — failover by design
-            last_err = e
-            print(f"[providers] {p.name} failed: {e!r} -> trying next")
-    return f"⚠️ සියලුම providers අසාර්ථකයි: {last_err}", "none"
+            if images and p.family == "local":
+                img_note = ("📷 Photos analyze කරන්න smart mode ඕන (vision model — "
+                            "Groq/Gemini free key). දැනට text විතරයි:\n\n")
+                return {"reply": prefix + img_note + p.chat(full_msg, max_tokens, temperature),
+                        "provider": p.name, "mode": mode}
+            return {"reply": prefix + p.chat(full_msg, max_tokens, temperature,
+                                             attachments=images or None),
+                    "provider": p.name, "mode": mode}
+        except Exception as e:  # noqa: BLE001
+            print(f"[modes] {p.name} failed: {e!r} -> next")
+    return {"reply": prefix + "⚠️ සියලුම providers අසාර්ථකයි.", "provider": "none", "mode": mode}
 
 
 # --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
 
-app = FastAPI(title="RS AI", version="1.2.0")
+app = FastAPI(title="RS AI", version="1.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 
 def _require_token(authorization: str | None) -> None:
-    """If RS_API_TOKEN is set, /chat and /v1 require 'Authorization: Bearer <token>'.
-
-    Keep unset for open access; set it for public deployments."""
     tok = os.environ.get("RS_API_TOKEN")
     if tok and authorization != f"Bearer {tok}":
         raise HTTPException(status_code=401, detail="invalid or missing API token (RS_API_TOKEN)")
 
 
+class Attachment(BaseModel):
+    name: str = "file"
+    kind: str = "file"          # "image" | "file"
+    mime: str = "text/plain"
+    data_b64: str = ""
+
+
 class ChatRequest(BaseModel):
     message: str
+    mode: str = "chat"          # chat | think | think_harder | research | image
+    attachments: list[Attachment] = []
     max_tokens: int = 400
     temperature: float = 0.8
     top_p: float = 0.9
@@ -153,6 +255,7 @@ def health():
         "context": cfg.block_size,
         "providers": [p.name for p in CHAIN],
         "active": CHAIN[0].name,
+        "modes": MODES,
     }
 
 
@@ -160,8 +263,12 @@ def health():
 def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
     _require_token(authorization)
     t0 = time.time()
-    reply, provider = smart_reply(req.message, req.max_tokens, req.temperature)
-    return {"reply": reply, "provider": provider, "latency_ms": int((time.time() - t0) * 1000)}
+    mode = (req.mode or "chat").lower()
+    if mode not in MODES:
+        mode = "chat"
+    result = smart_reply(req.message, mode, req.attachments, req.max_tokens, req.temperature)
+    result["latency_ms"] = int((time.time() - t0) * 1000)
+    return result
 
 
 class OAIMessage(BaseModel):
@@ -181,23 +288,23 @@ def openai_chat(req: OAIRequest, authorization: str | None = Header(default=None
     _require_token(authorization)
     user_msgs = [m.content for m in req.messages if m.role == "user"]
     message = user_msgs[-1] if user_msgs else ""
-    reply, provider = smart_reply(message, req.max_tokens, req.temperature)
+    result = smart_reply(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP), req.temperature)
     return {
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": req.model,
-        "provider": provider,
+        "provider": result["provider"],
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": reply},
+            "message": {"role": "assistant", "content": result["reply"]},
             "finish_reason": "stop",
         }],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
 
 
-CHAT_HTML = """<!DOCTYPE html>
+CHAT_HTML = r"""<!DOCTYPE html>
 <html lang="si">
 <head>
 <meta charset="utf-8">
@@ -215,7 +322,7 @@ CHAT_HTML = """<!DOCTYPE html>
     color: #e2e8f0; height: 100dvh; display: flex; flex-direction: column;
   }
   header {
-    padding: 14px 18px; display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; display: flex; align-items: center; gap: 12px;
     background: rgba(15,23,42,.75); backdrop-filter: blur(8px);
     border-bottom: 1px solid rgba(148,163,184,.15);
   }
@@ -227,30 +334,45 @@ CHAT_HTML = """<!DOCTYPE html>
   header .sub { font-size: 12px; color: #94a3b8; }
   .dot { width:8px; height:8px; border-radius:50%; background:#4ade80; display:inline-block; margin-right:5px;
          box-shadow: 0 0 8px #4ade80; }
-  #chat { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 82%; padding: 11px 15px; border-radius: 18px; line-height: 1.55;
+  #chat { flex: 1; overflow-y: auto; padding: 16px 14px 8px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 84%; padding: 11px 15px; border-radius: 18px; line-height: 1.55;
          font-size: 15px; white-space: pre-wrap; word-wrap: break-word; animation: pop .25s ease; }
   @keyframes pop { from { opacity:0; transform: translateY(6px);} to { opacity:1; } }
   .user { align-self: flex-end; background: linear-gradient(135deg,#7c3aed,#4f46e5);
           color: white; border-bottom-right-radius: 5px; }
   .bot  { align-self: flex-start; background: #1e293b; border: 1px solid rgba(148,163,184,.12);
           border-bottom-left-radius: 5px; }
-  .chiprow { display:flex; gap:8px; flex-wrap:wrap; padding: 0 18px 8px; }
-  .chip { background:#1e293b; border:1px solid rgba(148,163,184,.25); color:#c4b5fd;
-          padding:7px 13px; border-radius: 999px; font-size:13px; cursor:pointer; }
-  .chip:hover { background:#312e81; }
-  footer { padding: 12px 14px; background: rgba(15,23,42,.9); border-top: 1px solid rgba(148,163,184,.15);
-           display: flex; gap: 10px; }
-  input {
-    flex: 1; background: #1e293b; border: 1px solid rgba(148,163,184,.25); border-radius: 999px;
-    padding: 13px 18px; color: #e2e8f0; font-size: 15px; outline: none;
+  .bot img { max-width: 100%; border-radius: 10px; display: block; }
+  .sources { margin-top: 8px; font-size: 12px; color: #94a3b8; }
+  .sources a { color: #a78bfa; text-decoration: none; display: block; padding: 2px 0; }
+  .mrow { display:flex; gap:6px; overflow-x:auto; padding: 4px 12px 8px; scrollbar-width:none; }
+  .mrow::-webkit-scrollbar { display:none; }
+  .mchip { flex:0 0 auto; background:#16203a; border:1px solid rgba(148,163,184,.22); color:#cbd5e1;
+           padding:7px 12px; border-radius:999px; font-size:13px; cursor:pointer; }
+  .mchip.on { background: linear-gradient(135deg,#7c3aed,#4f46e5); color:#fff; border-color: transparent; }
+  .mchip.spk { margin-left:auto; }
+  .mchip.on.spk { background:#065f46; }
+  .attrow { display:flex; gap:6px; flex-wrap:wrap; padding: 0 12px 6px; }
+  .attchip { background:#312e81; color:#e0e7ff; font-size:12px; padding:6px 10px; border-radius:8px;
+             display:flex; gap:6px; align-items:center; }
+  .attchip b { cursor:pointer; color:#f87171; }
+  footer { padding: 8px 10px; background: rgba(15,23,42,.92); border-top: 1px solid rgba(148,163,184,.15);
+           display: flex; gap: 6px; align-items: flex-end; }
+  .ibtn {
+    background: #1e293b; border: 1px solid rgba(148,163,184,.18); color: #cbd5e1;
+    width: 42px; height: 42px; border-radius: 50%; font-size: 17px; cursor: pointer; flex: 0 0 auto;
   }
-  input:focus { border-color: #7c3aed; }
-  button {
+  .ibtn.rec { border-color:#f87171; color:#f87171; }
+  input#inp {
+    flex: 1; min-width: 60px; background: #1e293b; border: 1px solid rgba(148,163,184,.25); border-radius: 22px;
+    padding: 12px 16px; color: #e2e8f0; font-size: 15px; outline: none;
+  }
+  input#inp:focus { border-color: #7c3aed; }
+  #send {
     background: linear-gradient(135deg,#7c3aed,#4f46e5); border: none; color: white;
-    width: 48px; height: 48px; border-radius: 50%; font-size: 19px; cursor: pointer;
+    width: 44px; height: 44px; border-radius: 50%; font-size: 18px; cursor: pointer; flex: 0 0 auto;
   }
-  button:disabled { opacity: .5; }
+  #send:disabled { opacity: .5; }
   .typing { display:inline-flex; gap:4px; padding: 14px 16px; }
   .typing span { width:7px; height:7px; border-radius:50%; background:#94a3b8; animation: blink 1.2s infinite; }
   .typing span:nth-child(2){ animation-delay:.2s } .typing span:nth-child(3){ animation-delay:.4s }
@@ -262,29 +384,43 @@ CHAT_HTML = """<!DOCTYPE html>
   <div class="logo">🤖</div>
   <div>
     <h1>RS AI</h1>
-    <div class="sub"><span class="dot" id="dot"></span><span id="subtxt">සබැඳිවෙමින්…</span></div>
+    <div class="sub"><span class="dot"></span><span id="subtxt">සබැඳිවෙමින්…</span></div>
   </div>
 </header>
 <div id="chat">
-  <div class="msg bot">ආයුබෝවන්! මම <b>RS AI</b> — සිංහල සහ ඉංග්‍රීසි කතා කරන AI සහායකයෙක්. ප්‍රශ්නයක් අහන්න! 👋</div>
+  <div class="msg bot">ආයුබෝවන්! 👋 මම <b>RS AI</b>. උඩ mode එකක් තෝරන්න — 💬 chat, 💡 thinking, 🔬 research, 🎨 image. Photos/files attach කරන්නත්, 🎙️ voice වලින් අහන්නත් පුළුවන්!</div>
 </div>
-<div class="chiprow">
-  <div class="chip" onclick="ask('ඔයා කවුද?')">ඔයා කවුද?</div>
-  <div class="chip" onclick="ask('සීගිරිය ගැන කියන්න')">සීගිරිය 🏰</div>
-  <div class="chip" onclick="ask('AI කියන්නේ මොකක්ද?')">AI කියන්නේ මොකක්ද?</div>
-  <div class="chip" onclick="ask('what can you do?')">What can you do?</div>
+<div class="mrow" id="modes">
+  <div class="mchip on" data-m="chat">💬 Chat</div>
+  <div class="mchip" data-m="think">💡 Thinking</div>
+  <div class="mchip" data-m="think_harder">🧠 Think harder</div>
+  <div class="mchip" data-m="research">🔬 Deep research</div>
+  <div class="mchip" data-m="image">🎨 Create image</div>
+  <div class="mchip spk" id="spk">🔊</div>
 </div>
+<div class="attrow" id="atts"></div>
 <footer>
+  <button class="ibtn" id="bfile" title="Files">📁</button>
+  <button class="ibtn" id="bimg" title="Photos">🖼️</button>
+  <button class="ibtn" id="bcam" title="Camera">📷</button>
+  <button class="ibtn" id="bmic" title="Voice">🎙️</button>
   <input id="inp" placeholder="මෙසේජ් එකක් ලියන්න…" autocomplete="off">
   <button id="send" onclick="send()">➤</button>
 </footer>
+<input type="file" id="ffile" hidden accept=".txt,.md,.json,.csv,.log,.py,.js,.ts,.html,.css,.xml,.yaml,.yml,.ini,.toml,.sh,.java,.kt,.c,.cpp,.go,.rs,.sql,.pdf">
+<input type="file" id="fimg" hidden accept="image/*">
+<input type="file" id="fcam" hidden accept="image/*" capture="environment">
 <script>
 const chat = document.getElementById('chat');
 const inp = document.getElementById('inp');
-const btn = document.getElementById('send');
+const sendBtn = document.getElementById('send');
+let mode = 'chat';
+let atts = [];          // {name,kind,mime,data_b64}
+let speakOn = false;
+
 inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
-// optional API token: open once with ?token=XXXX — remembered afterwards
+// optional API token (?token=XXXX once)
 const qs = new URLSearchParams(location.search);
 if (qs.get('token')) {
   localStorage.setItem('rsai_token', qs.get('token'));
@@ -295,13 +431,90 @@ function authHeaders() {
   return t ? { 'Authorization': 'Bearer ' + t } : {};
 }
 
+// mode chips
+document.getElementById('modes').addEventListener('click', e => {
+  const c = e.target.closest('.mchip');
+  if (!c || c.id === 'spk') return;
+  document.querySelectorAll('#modes .mchip').forEach(x => x.classList.remove('on'));
+  c.classList.add('on');
+  mode = c.dataset.m;
+  inp.placeholder = mode === 'image' ? 'ඇඳන්න ඕන දේ ලියන්න… 🎨'
+                  : mode === 'research' ? '🔬 research කරන මාතෘකාව…'
+                  : 'මෙසේජ් එකක් ලියන්න…';
+  inp.focus();
+});
+
+// speaker toggle
+const spk = document.getElementById('spk');
+spk.onclick = () => {
+  speakOn = !speakOn;
+  spk.classList.toggle('on', speakOn);
+  if (!speakOn && window.speechSynthesis) speechSynthesis.cancel();
+};
+function speak(text) {
+  if (!speakOn || !window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(text.slice(0, 900));
+  u.lang = /[\u0D80-\u0DFF]/.test(text) ? 'si-LK' : 'en-US';
+  speechSynthesis.speak(u);
+}
+
+// attachments
+const ffile = document.getElementById('ffile');
+const fimg = document.getElementById('fimg');
+const fcam = document.getElementById('fcam');
+document.getElementById('bfile').onclick = () => ffile.click();
+document.getElementById('bimg').onclick = () => fimg.click();
+document.getElementById('bcam').onclick = () => fcam.click();
+[ffile, fimg, fcam].forEach(f => f.addEventListener('change', () => {
+  const file = f.files[0];
+  f.value = '';
+  if (!file) return;
+  if (atts.length >= 3) { add('⚠️ files 3ක් දක්වායි', 'bot'); return; }
+  if (file.size > 3 * 1024 * 1024) { add(`⚠️ '${file.name}' ලොකු වැඩියි (max 3MB)`, 'bot'); return; }
+  const rd = new FileReader();
+  rd.onload = () => {
+    const b64 = String(rd.result).split(',')[1] || '';
+    atts.push({ name: file.name, kind: file.type.startsWith('image/') ? 'image' : 'file',
+                mime: file.type || 'application/octet-stream', data_b64: b64 });
+    renderAtts();
+  };
+  rd.readAsDataURL(file);
+}));
+function renderAtts() {
+  const row = document.getElementById('atts');
+  row.innerHTML = '';
+  atts.forEach((a, i) => {
+    const c = document.createElement('div');
+    c.className = 'attchip';
+    c.innerHTML = `${a.kind === 'image' ? '🖼️' : '📄'} ${a.name.slice(0, 22)}`;
+    const x = document.createElement('b');
+    x.textContent = ' ✕';
+    x.onclick = () => { atts.splice(i, 1); renderAtts(); };
+    c.appendChild(x);
+    row.appendChild(c);
+  });
+}
+
+// voice input
+const bmic = document.getElementById('bmic');
+let recog = null;
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recog = new SR();
+  recog.lang = 'si-LK';
+  recog.interimResults = false;
+  recog.onresult = e => { inp.value = e.results[0][0].transcript; inp.focus(); };
+  recog.onend = () => bmic.classList.remove('rec');
+}
+bmic.onclick = () => {
+  if (!recog) { add('🎙️ මේ browser එකේ voice input නැහැ (Chrome try කරන්න)', 'bot'); return; }
+  try { recog.start(); bmic.classList.add('rec'); } catch (e) { recog.stop(); }
+};
+
 fetch('/health').then(r => r.json()).then(h => {
   const el = document.getElementById('subtxt');
-  if (h.active && h.active !== 'rs-gpt-local') {
-    el.textContent = '⚡ smart mode · ' + h.active + ' · Sinhala + English';
-  } else {
-    el.textContent = 'සබැඳි · Sinhala + English · RS-GPT local';
-  }
+  el.textContent = (h.active && h.active !== 'rs-gpt-local')
+    ? '⚡ smart · ' + h.active : 'සබැඳි · Sinhala + English · RS-GPT';
 }).catch(() => { document.getElementById('subtxt').textContent = 'සබැඳි'; });
 
 function add(text, cls) {
@@ -312,40 +525,69 @@ function add(text, cls) {
   chat.scrollTop = chat.scrollHeight;
   return d;
 }
-function ask(q) { inp.value = q; send(); }
-async function send() {
-  const text = inp.value.trim();
-  if (!text) return;
-  inp.value = '';
-  add(text, 'user');
-  btn.disabled = true;
+function typingBubble() {
+  const labels = { chat: 'ටයිප් කරමින්', think: '💡 හිතමින්', think_harder: '🧠 ගැඹුරුව හිතමින්',
+                   research: '🔬 research කරමින්', image: '🎨 image හදමින්' };
   const t = document.createElement('div');
   t.className = 'msg bot typing';
-  t.innerHTML = '<span></span><span></span><span></span>';
+  t.title = labels[mode] || '';
+  t.innerHTML = '<span></span><span></span><span></span>&nbsp;' + (labels[mode] || '');
   chat.appendChild(t);
   chat.scrollTop = chat.scrollHeight;
+  return t;
+}
+
+async function send() {
+  const text = inp.value.trim();
+  if (!text && atts.length === 0) return;
+  if (text) add(text + (atts.length ? `\n📎 ${atts.length} attachment(s)` : ''), 'user');
+  else add(`📎 ${atts.length} attachment(s)`, 'user');
+  inp.value = '';
+  const payload = { message: text || '(attachment)', mode, attachments: atts };
+  atts = []; renderAtts();
+  sendBtn.disabled = true;
+  const t = typingBubble();
   try {
     const r = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ message: text })
+      body: JSON.stringify(payload)
     });
+    if (r.status === 401) {
+      t.remove();
+      add('🔑 API token එක වැරදියි — URL එකට ?token=XXXX දාලා ආයේ open කරන්න', 'bot');
+      return;
+    }
     const j = await r.json();
     t.remove();
-    add(j.reply || '…', 'bot');
+    if (j.image_url) {
+      const d = add(j.reply || '🎨', 'bot');
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = j.image_url;
+      img.onclick = () => window.open(j.image_url, '_blank');
+      d.appendChild(document.createElement('br'));
+      d.appendChild(img);
+    } else {
+      add(j.reply || '…', 'bot');
+    }
+    if (j.sources && j.sources.length) {
+      const s = add('', 'bot');
+      s.innerHTML = '<div class="sources"><b>📚 මූලාශ්‍ර</b></div>';
+      j.sources.forEach(x => {
+        const a = document.createElement('a');
+        a.href = x.url; a.target = '_blank';
+        a.textContent = '• ' + x.title;
+        s.querySelector('.sources').appendChild(a);
+      });
+    }
+    chat.scrollTop = chat.scrollHeight;
+    speak(j.reply || '');
   } catch (e) {
     t.remove();
-    add('⚠️ දෝෂයක් — server එක බලන්න / Error: ' + e.message, 'bot');
+    add('⚠️ දෝෂයක්: ' + e.message, 'bot');
   }
-  btn.disabled = false;
-  inp.focus();
-}
-
-// PWA — installable app shell
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () =>
-    navigator.serviceWorker.register('/static/sw.js').catch(() => {})
-  );
+  sendBtn.disabled = false;
 }
 </script>
 </body>

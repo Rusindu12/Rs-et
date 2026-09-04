@@ -57,3 +57,11 @@ App එක open කරලා **⚙️ (Settings)** icon එක tap කරලා 
 PC එකේ IP එක සොයා ගන්න: Windows → `ipconfig`, Linux/Mac → `ip a`.
 
 සටහන: සිංහලෙන් type කරන්න Gboard හෝ Helakuru keyboard එක install කරගන්න.
+
+## App features 🎛️
+
+- **Mode chips**: 💬 Chat · 💡 Thinking · 🧠 Think harder · 🔬 Deep research · 🎨 Image — server smart mode එකේම වැඩ කරයි
+- **📎 Attach**: 📁 files, 🖼️ gallery photos, 📷 camera (photo analyze → smart mode vision)
+- **🎙️ Voice input**: සිංහල speech recognizer (RECORD_AUDIO permission අහයි)
+- Research mode answers w/ 📚 clickable sources; image mode generated images bubbles wල
+- Server side කිසිම key එකක් නැත්නම් local RS-GPT mode එකෙන් reply — app එක dead වෙන්නේ නෑ

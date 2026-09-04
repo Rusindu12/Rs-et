@@ -71,6 +71,21 @@ python server/main.py
 
 ## Behavior
 
+## 🎛️ Smart Modes (app/web UI mode chips)
+
+| Mode | කොහොමද වැඩ කරන්නේ | Needs |
+|---|---|---|
+| 💬 `chat` | Provider chain, text + 📷 image attachments (vision) | vision model = `RS_MODEL_VISION` |
+| 💡 `think` | Reasoning model (DeepSeek-R1/o4-mini…) | `RS_MODEL_THINK` or preset |
+| 🧠 `think_harder` | Same model, tokens ×2.5, temp ↓ | same |
+| 🔬 `research` | Query-gen → web search → page fetch → cited synthesis | external + internet |
+| 🎨 `image` | OpenAI images API if `RS_IMAGE_MODEL` set, else FREE key-less Pollinations | none ✅ |
+
+Presets (auto per provider): think → groq:`deepseek-r1-distill-llama-70b`, openai:`o4-mini`,
+deepseek:`deepseek-reasoner`; vision → groq:`llama-4-scout-17b`, openai/gemini: default model.
+`/chat` body: `{"message","mode","attachments":[{"name","kind":"image|file","mime","data_b64"}]}`
+response: `{"reply","provider","mode","image_url"?,"sources"?,"latency_ms"}`
+
 - External provider එකට දෙන system prompt එක: *"You are RS AI... fluent in
   Sinhala and English. Reply in the SAME language the user uses."* → external AI
   එකත් **සිංහලෙන්, RS AI ලෙස** කතා කරයි

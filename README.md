@@ -61,6 +61,16 @@ Dark Material 3 chat UI — Sinhala placeholder text, suggestion chips,
 typing indicator, server URL settings dialog. Server එකේ web UI එකත්
 එම design එකම use කරනවා.
 
+## 🎛️ Smart Modes
+
+App/web UI mode chips — ChatGPT app එක වගේම:
+
+| 💬 Chat | 💡 Thinking | 🧠 Think harder | 🔬 Deep research | 🎨 Create image |
+|---|---|---|---|---|
+| provider chain + 📷 vision | reasoning model (R1/o4-mini) | tokens ×2.5 | web search + citations ✓ | OpenAI images / free Pollinations |
+
+Plus: 📎 **files/photos/camera attachments** · 🎙️ **voice input (සිංහල)** · 🔊 **voice replies** — web UI ඉඳනේ.
+
 ## 🌍 Access from Anywhere
 
 RS AI server එක public කරලා **ඕනම device එකකින්** use කරන්න පුළුවන්:
