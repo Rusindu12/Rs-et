@@ -1,5 +1,13 @@
 # RS AI Server — Smart Routing (සිංහල guide)
 
+> ⚠️ **Sandbox note:** Arena live-preview sandbox එකේ external AI API hosts
+> (Groq/Gemini/OpenAI...) network-block — ඒ නිසා preview එක local mode එකේයි.
+> **ඔයාගේ PC/server/Colab** එකක run කළොත් smart mode එක වැඩ කරයි — පියවර 3යි:
+>
+> 1. [console.groq.com](https://console.groq.com) → *API Keys* → *Create* (**නොමිලේ**)
+> 2. `server/.env.example` copy කරලා `server/.env` කියලා save කරලා key එක දාන්න
+> 3. `python server/main.py` → header එකේ ⚡ smart mode කියලා එනවා!
+
 Server එක දෙකෙන්ම උත්තර දෙයි:
 
 1. **වෙනත් AI service එකක්** (Groq/OpenAI/Gemini/...) — API key එකක් set කළොත්,

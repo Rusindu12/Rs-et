@@ -26,3 +26,7 @@ android-app/local.properties
 **/build/
 *.apk
 *.aab
+
+# Secrets — API keys (use server/.env.example as the template)
+.env
+server/.env

@@ -44,6 +44,27 @@ CKPT = os.environ.get("RS_CKPT", str(ROOT / "model" / "runs" / "demo" / "ckpt.pt
 TOKENIZER = os.environ.get("RS_TOKENIZER", None)
 MAX_TOKENS_CAP = 512
 
+
+def _load_dotenv():
+    """Minimal .env loader (no dependency): KEY=VALUE lines, '#' comments.
+
+    Put your API key in server/.env (git-ignored) and just run the server —
+    smart mode activates automatically."""
+    candidates = (Path(__file__).resolve().parent / ".env", ROOT / ".env")
+    for cand in candidates:
+        if cand.exists():
+            for line in cand.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            print(f"[server] loaded env from {cand}")
+            return
+
+
+_load_dotenv()
+
 # --------------------------------------------------------------------------- #
 # Load local RS-GPT model
 # --------------------------------------------------------------------------- #
