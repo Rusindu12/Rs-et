@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   build:
@@ -29,7 +30,27 @@ jobs:
 
       - name: Build APK (debug-signed, installable)
         working-directory: android-app
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+
+      - name: Report failure log as GitHub issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "### APK build failed"
+            echo "Run: https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo '```gradle'
+            tail -c 5500 /tmp/build.log
+            echo '```'
+          } | gh issue create \
+                --title "❌ CI APK build failed (${GITHUB_SHA:0:7})" \
+                --body-file - \
+                --repo "${REPO}" || true
 
       - uses: actions/upload-artifact@v4
         with:
