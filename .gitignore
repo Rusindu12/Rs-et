@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*
+
+# Model artifacts (generated during training — too large for git)
+*.pt
+*.pth
+*.npy
+model/tokenizer/*.model
+model/tokenizer/*.vocab
+model/runs/
+
+# Android / Gradle
+android-app/.gradle/
+android-app/local.properties
+**/build/
+*.apk
+*.aab
