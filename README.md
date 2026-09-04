@@ -1,5 +1,8 @@
 # RS AI — සිංහල/English LLM (up to 4B) + Android App 🤖
 
+[![Android APK](https://github.com/Rusindu12/Rs-et/actions/workflows/android.yml/badge.svg)](https://github.com/Rusindu12/Rs-et/actions/workflows/android.yml)
+[![Python CI](https://github.com/Rusindu12/Rs-et/actions/workflows/python-ci.yml/badge.svg)](https://github.com/Rusindu12/Rs-et/actions/workflows/python-ci.yml)
+
 සිංහල සහ ඉංග්‍රීසි කතා කරන **තමන්ගේම AI model එකක්** (3.6M → **~3.95B "4B"** configs) —
 training pipeline එක, inference server එක, සහ Android chat app එක එකතුව.
 
