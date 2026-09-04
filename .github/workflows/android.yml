@@ -44,8 +44,13 @@ jobs:
             echo "### APK build failed"
             echo "Run: https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}"
             echo ""
+            echo "**Kotlin errors (e: lines):**"
+            echo '```'
+            grep -E "^e: |error:" /tmp/build.log | head -40
+            echo '```'
+            echo "**Log tail:**"
             echo '```gradle'
-            tail -c 5500 /tmp/build.log
+            tail -c 3500 /tmp/build.log
             echo '```'
           } | gh issue create \
                 --title "❌ CI APK build failed (${GITHUB_SHA:0:7})" \
