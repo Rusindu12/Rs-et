@@ -9,8 +9,8 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
-  issues: write
+  contents: write   # for the APK release
+  issues: write     # for auto failure reports
 
 jobs:
   build:
@@ -62,3 +62,17 @@ jobs:
           name: RS-AI-debug-apk
           path: android-app/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish APK to GitHub Releases (permanent link)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          cp android-app/app/build/outputs/apk/debug/*.apk /tmp/RS-AI.apk
+          gh release view apk-latest --repo "${REPO}" >/dev/null 2>&1 || \
+            gh release create apk-latest --repo "${REPO}" \
+                --title "RS AI — Android APK (latest debug build)" \
+                --notes "Auto-built from main branch. Debug-signed, installable. Commit: ${SHA}"
+          gh release upload apk-latest /tmp/RS-AI.apk --repo "${REPO}" --clobber
+          echo "APK is live at: https://github.com/${REPO}/releases/tag/apk-latest"
