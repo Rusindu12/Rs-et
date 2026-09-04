@@ -24,9 +24,10 @@ from pathlib import Path
 
 import torch
 import sentencepiece as spm
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # repo root on path so "model" package is importable
@@ -121,8 +122,18 @@ def smart_reply(message: str, max_tokens: int, temperature: float):
 # API
 # --------------------------------------------------------------------------- #
 
-app = FastAPI(title="RS AI", version="1.1.0")
+app = FastAPI(title="RS AI", version="1.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+
+
+def _require_token(authorization: str | None) -> None:
+    """If RS_API_TOKEN is set, /chat and /v1 require 'Authorization: Bearer <token>'.
+
+    Keep unset for open access; set it for public deployments."""
+    tok = os.environ.get("RS_API_TOKEN")
+    if tok and authorization != f"Bearer {tok}":
+        raise HTTPException(status_code=401, detail="invalid or missing API token (RS_API_TOKEN)")
 
 
 class ChatRequest(BaseModel):
@@ -146,7 +157,8 @@ def health():
 
 
 @app.post("/chat")
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
+    _require_token(authorization)
     t0 = time.time()
     reply, provider = smart_reply(req.message, req.max_tokens, req.temperature)
     return {"reply": reply, "provider": provider, "latency_ms": int((time.time() - t0) * 1000)}
@@ -165,7 +177,8 @@ class OAIRequest(BaseModel):
 
 
 @app.post("/v1/chat/completions")
-def openai_chat(req: OAIRequest):
+def openai_chat(req: OAIRequest, authorization: str | None = Header(default=None)):
+    _require_token(authorization)
     user_msgs = [m.content for m in req.messages if m.role == "user"]
     message = user_msgs[-1] if user_msgs else ""
     reply, provider = smart_reply(message, req.max_tokens, req.temperature)
@@ -190,6 +203,10 @@ CHAT_HTML = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>RS AI — සිංහල AI Chat</title>
+<link rel="manifest" href="/static/manifest.webmanifest">
+<meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<link rel="icon" type="image/png" href="/static/icon-192.png">
 <style>
   * { box-sizing: border-box; margin: 0; }
   body {
@@ -267,6 +284,17 @@ const inp = document.getElementById('inp');
 const btn = document.getElementById('send');
 inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
+// optional API token: open once with ?token=XXXX — remembered afterwards
+const qs = new URLSearchParams(location.search);
+if (qs.get('token')) {
+  localStorage.setItem('rsai_token', qs.get('token'));
+  history.replaceState({}, '', location.pathname);
+}
+function authHeaders() {
+  const t = localStorage.getItem('rsai_token');
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+
 fetch('/health').then(r => r.json()).then(h => {
   const el = document.getElementById('subtxt');
   if (h.active && h.active !== 'rs-gpt-local') {
@@ -299,7 +327,7 @@ async function send() {
   try {
     const r = await fetch('/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ message: text })
     });
     const j = await r.json();
@@ -311,6 +339,13 @@ async function send() {
   }
   btn.disabled = false;
   inp.focus();
+}
+
+// PWA — installable app shell
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () =>
+    navigator.serviceWorker.register('/static/sw.js').catch(() => {})
+  );
 }
 </script>
 </body>

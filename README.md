@@ -21,9 +21,12 @@ Rs-et/
 │   └── README.md           #   📖 සිංහල 1B training guide (GPU steps)
 │
 ├── server/
-│   ├── main.py             # FastAPI: /chat + /v1/chat/completions + web UI
+│   ├── main.py             # FastAPI: /chat + /v1/chat/completions + web UI + PWA
 │   ├── providers.py        # 🔀 smart routing: Groq/OpenAI/Gemini/custom + local fallback
+│   ├── static/             #   PWA: manifest, service worker, icons
 │   └── README.md           #   📖 API key setup guide (නොමිලේ keys)
+├── docs/ACCESS.md          # 🌍 deploy anywhere + PWA + API token guide
+├── Dockerfile              # 🐳 one-image deploy (HF Spaces / Render / VPS)
 │
 └── android-app/            # RS AI Chat — Kotlin + Jetpack Compose app
     ├── app/src/main/java/com/ruset/ai/
@@ -57,6 +60,16 @@ RS_PROVIDER=groq RS_API_KEY=gsk_... python server/main.py
 Dark Material 3 chat UI — Sinhala placeholder text, suggestion chips,
 typing indicator, server URL settings dialog. Server එකේ web UI එකත්
 එම design එකම use කරනවා.
+
+## 🌍 Access from Anywhere
+
+RS AI server එක public කරලා **ඕනම device එකකින්** use කරන්න පුළුවන්:
+* 🐳 **Dockerfile** — Hugging Face Spaces / Render / Railway / VPS
+* 📱 **PWA** — browser එකෙන් "Add to Home Screen" (APK නැතුවත් app වගේ)
+* 🔑 **RS_API_TOKEN** — public server protect කිරීම
+* 🔌 **OpenAI-compatible API** — ඕනම client/SDK/app එකෙන්
+
+📖 සම්පූර්ණ guide: **[docs/ACCESS.md](docs/ACCESS.md)**
 
 ## 🧠 Real Training (1B / 4B)
 

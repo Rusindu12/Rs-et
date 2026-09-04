@@ -19,6 +19,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var serverUrl by mutableStateOf(prefs.getString("server_url", DEFAULT_URL) ?: DEFAULT_URL)
         private set
 
+    var apiToken by mutableStateOf(prefs.getString("api_token", "") ?: "")
+        private set
+
     val messages = mutableStateListOf(
         ChatMessage("ආයුබෝවන්! 👋 මම RS AI — සිංහල සහ ඉංග්‍රීසි කතා කරන AI සහායකයෙක්. ප්‍රශ්නයක් අහන්න!", false)
     )
@@ -34,6 +37,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setApiToken(token: String) {
+        apiToken = token.trim()
+        prefs.edit().putString("api_token", apiToken).apply()
+    }
+
     fun send(text: String) {
         val msg = text.trim()
         if (msg.isEmpty() || isTyping) return
@@ -42,7 +50,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             try {
-                val reply = ApiClient.chat(serverUrl, msg)
+                val reply = ApiClient.chat(serverUrl, msg, apiToken)
                 messages.add(ChatMessage(reply, isUser = false))
             } catch (e: Exception) {
                 messages.add(

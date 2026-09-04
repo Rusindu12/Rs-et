@@ -286,6 +286,7 @@ fun InputBar(vm: ChatViewModel) {
 @Composable
 fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
     var url by remember { mutableStateOf(vm.serverUrl) }
+    var token by remember { mutableStateOf(vm.apiToken) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -296,7 +297,8 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                 Text(
                     "RS AI server එක ලියුම් ලිපිනය.\n" +
                         "• Emulator: http://10.0.2.2:8000\n" +
-                        "• Phone (එකම Wi-Fi): http://<PC IP>:8000",
+                        "• Phone (එකම Wi-Fi): http://<PC IP>:8000\n" +
+                        "• Public server නම් deploy URL එක + token",
                     fontSize = 13.sp, color = TextDim, lineHeight = 19.sp
                 )
                 OutlinedTextField(
@@ -304,7 +306,20 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                     onValueChange = { url = it },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    placeholder = { Text("http://10.0.2.2:8000") },
+                    placeholder = { Text("https://your-server") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Purple,
+                        focusedTextColor = TextMain,
+                        unfocusedTextColor = TextMain
+                    )
+                )
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    placeholder = { Text("API token (optional)", color = TextDim) },
+                    label = { Text("API token", color = TextDim) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Purple,
                         focusedTextColor = TextMain,
@@ -314,7 +329,11 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = { vm.setServerUrl(url); onDismiss() }) {
+            TextButton(onClick = {
+                vm.setServerUrl(url)
+                vm.setApiToken(token)
+                onDismiss()
+            }) {
                 Text("Save", color = Lavender, fontWeight = FontWeight.Bold)
             }
         },
