@@ -495,8 +495,8 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                 )
                 Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = {
-                        vm.setServerUrl(url)
-                        vm.setApiToken(token)
+                        vm.updateServerUrl(url)
+                        vm.updateApiToken(token)
                         testResult = null
                         vm.testConnection { ok, detail -> testResult = detail }
                     }) {
