@@ -1,10 +1,11 @@
-# RS AI — සිංහල/English 1B LLM + Android App 🤖
+# RS AI — සිංහල/English LLM (up to 4B) + Android App 🤖
 
-සිංහල සහ ඉංග්‍රීසි කතා කරන **තමන්ගේම AI model එකක්** (1B parameters දක්වා) —
+සිංහල සහ ඉංග්‍රීසි කතා කරන **තමන්ගේම AI model එකක්** (3.6M → **~3.95B "4B"** configs) —
 training pipeline එක, inference server එක, සහ Android chat app එක එකතුව.
 
-Your own Sinhala + English AI model (up to ~1B params) — training pipeline,
-FastAPI inference server, and an Android chat app, all in one repo.
+Your own Sinhala + English AI model (configs from a 3.6M CPU demo up to a
+~3.95B-parameter "rs-gpt-4b" flagship) — training pipeline, FastAPI inference
+server, and an Android chat app, all in one repo.
 
 ## 🗂️ Project Structure
 
@@ -12,7 +13,7 @@ FastAPI inference server, and an Android chat app, all in one repo.
 Rs-et/
 ├── model/                  # RS-GPT — language model + training code
 │   ├── gpt.py              #   Transformer (RMSNorm, RoPE, SwiGLU, ~1B config)
-│   ├── config.py           #   Model sizes: rs-gpt-1b / 1.2b / 60m / demo
+│   ├── config.py           #   Model sizes: rs-gpt-4b / 1b / 1.2b / 60m / demo
 │   ├── tokenizer_train.py  #   SentencePiece BPE tokenizer (Sinhala-safe)
 │   ├── train.py            #   Training loop (AMP, cosine LR, checkpoints)
 │   ├── generate.py         #   CLI generation
@@ -51,11 +52,17 @@ Dark Material 3 chat UI — Sinhala placeholder text, suggestion chips,
 typing indicator, server URL settings dialog. Server එකේ web UI එකත්
 එම design එකම use කරනවා.
 
-## 🧠 Real 1B Training
+## 🧠 Real Training (1B / 4B)
 
-සැබෑ 1B model එකක් train කරන්න GPU එකක් ඕන (A100 එකකදී දවස් ~10-12).
+සැබෑ large models train කරන්න GPU එකක් ඕන:
+* **rs-gpt-1b** (0.98B) — A100-40GB, දවස් ~10-12 (20B tokens)
+* **rs-gpt-4b** (3.95B) — `--optim adamw8bit --grad-checkpoint` සමඟ A100-40GB
+  එකකින් වුණත් ප්‍රචණ්ඩ කාලයකදී; H100/80GB හොඳම (40B tokens ≈ Chinchilla-lite)
+
 සම්පූර්ණ Sinhala guide එක: [`model/README.md`](model/README.md)
 — data sources (CulturaX `si`, CC-100), tokenizer, commands ඔක්කොම තියෙනවා.
+Train කරපු ckpt එක server එකට දාන්න:
+`RS_CKPT=model/runs/rs-gpt-4b/ckpt.pt python server/main.py`
 
 ---
 

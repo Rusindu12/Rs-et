@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 
 
 # ----------------------------------------------------------------------------
@@ -139,6 +140,9 @@ class GPT(nn.Module):
         # weight tying: input embedding == output projection
         self.lm_head.weight = self.tok_emb.weight
 
+        # set True to trade ~30% speed for much lower activation memory
+        self.grad_checkpointing = False
+
         cos, sin = precompute_rope_freqs(cfg.d_model // cfg.n_head, cfg.block_size, cfg.rope_base)
         self.register_buffer("rope_cos", cos, persistent=False)
         self.register_buffer("rope_sin", sin, persistent=False)
@@ -171,7 +175,10 @@ class GPT(nn.Module):
 
         x = self.drop(self.tok_emb(idx))
         for block in self.blocks:
-            x = block(x, cos, sin)
+            if self.grad_checkpointing and self.training:
+                x = torch.utils.checkpoint.checkpoint(block, x, cos, sin, use_reentrant=False)
+            else:
+                x = block(x, cos, sin)
         x = self.norm_f(x)
         logits = self.lm_head(x)
 

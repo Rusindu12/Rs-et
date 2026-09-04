@@ -12,6 +12,14 @@ model/tokenizer/*.model
 model/tokenizer/*.vocab
 model/runs/
 
+# ...EXCEPT the tiny demo artifacts (3.6M model, ~15 MB) — committed so the
+# server works out-of-the-box without retraining:
+!model/runs/
+!model/runs/demo/
+!model/runs/demo/ckpt.pt
+!model/tokenizer/rs_sp.model
+!model/tokenizer/rs_sp.vocab
+
 # Android / Gradle
 android-app/.gradle/
 android-app/local.properties

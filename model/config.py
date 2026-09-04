@@ -18,6 +18,15 @@ CONFIGS = {
         n_layer=20, n_head=16, d_model=2048, d_ff=5504,
         dropout=0.0,
     ),
+    # ---- ~3.95B ("4B class") model ----
+    # emb: 32000*3072 = 98.3M | per layer: 4*d^2 + 3*d*ff = 37.7M + 75.5M = 113.2M
+    # 34 layers = 3.85B  ->  total ~= 3.95B params (tied LM head)
+    # Training needs serious GPU power — see README (H100/A100-80GB + grad ckpt).
+    "rs-gpt-4b": GPTConfig(
+        vocab_size=32000, block_size=2048,
+        n_layer=34, n_head=24, d_model=3072, d_ff=8192,
+        dropout=0.0,
+    ),
     # Small model for quick experiments on a single GPU (e.g. Colab T4)
     "rs-gpt-60m": GPTConfig(
         vocab_size=32000, block_size=1024,

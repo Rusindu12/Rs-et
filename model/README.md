@@ -1,10 +1,11 @@
-# RS-GPT — සිංහල/English 1B Language Model
+# RS-GPT — සිංහල/English Language Models (3.6M → 4B params)
 
 සිංහල සහ ඉංග්‍රීසි කතා කරන, **0 ඉඳන්ම තමාගේන්ම** train කරන GPT-style
-decoder-only transformer ආකෘතියක්. උපරිම config එක ~**1.0B parameters** (~976M).
+decoder-only transformer design එකක්. Configs: demo 3.6M ඉඳන් flagship
+**~3.95B ("4B")** දක්වා.
 
-A from-scratch Sinhala + English GPT-style language model with a ~1B parameter
-headline configuration, plus smaller configs for experimentation.
+A from-scratch Sinhala + English GPT-style transformer, with configs from a
+3.6M CPU demo up to a ~3.95B-parameter flagship ("rs-gpt-4b").
 
 ## ගෘහනිර්මාණය (Architecture)
 
@@ -20,12 +21,28 @@ headline configuration, plus smaller configs for experimentation.
 
 ## Configs
 
-| Config | Params | Layers | d_model | Context | Purpose |
-|---|---|---|---|---|---|
-| `rs-gpt-1b` | ~0.98B | 18 | 2048 | 2048 | The 1B flagship |
-| `rs-gpt-1.2b` | ~1.08B | 20 | 2048 | 2048 | Bigger variant |
-| `rs-gpt-60m` | ~77M | 8 | 512 | 1024 | Single-GPU experiments |
-| `rs-gpt-demo` | ~3.6M | 4 | 256 | 128 | CPU demo / pipeline test |
+| Config | Params | Layers | d_model | Heads | Context | Purpose |
+|---|---|---|---|---|---|---|
+| `rs-gpt-4b` | **~3.95B** | 34 | 3072 | 24 | 2048 | 🏆 Flagship 4B |
+| `rs-gpt-1b` | ~0.98B | 18 | 2048 | 16 | 2048 | The 1B flagship |
+| `rs-gpt-1.2b` | ~1.08B | 20 | 2048 | 16 | 2048 | Bigger 1B variant |
+| `rs-gpt-60m` | ~42M | 8 | 512 | 8 | 1024 | Single-GPU experiments |
+| `rs-gpt-demo` | ~3.6M | 4 | 256 | 4 | 128 | CPU demo / pipeline test |
+
+## Hardware guide (training)
+
+| Config | Optimizer | Suggested GPU | Notes |
+|---|---|---|---|
+| demo | adamw | CPU only | විනාඩි ~5 |
+| 60m | adamw | T4 16GB (Colab free) | overnight run = decent small model |
+| 1b | adamw | A100-40GB | bf16 + grad-accum |
+| **4b** | **adamw8bit + --grad-checkpoint** | **A100-40GB possible*, H100/A100-80GB හොඳම** | *batch 4-8 + accum |
+
+4B training memory breakdown (bf16, grad-checkpoint, adamw8bit):
+weights ~8GB + grads ~8GB + optimizer ~8GB + activations ~6-12GB ≈ **30-40GB** →
+A100-40GB එකකට ඉඩ තියෙනවා. Chinchilla tokens for 4B ≈ **80B tokens** —
+single A100-40GB එකකදී සති ගණනක්; H100 8× multi-GPU (DDP roadmap) දවස් ගණන.
+පටන් ගැනීමට: 4B + tokens 2-4B (under-trained නමුත් usable) = දවස් 2-4 @ A100.
 
 ## Quick start (demo — CPU වලින් වුණත් වැඩ කරයි)
 
@@ -112,6 +129,25 @@ python train.py --config rs-gpt-1b \
 * VRAM: 1B model bf16 + AdamW ≈ ~18-22 GB → A100-40GB/80GB හරි යයි.
 * Multi-GPU: code එක single-GPU සරලයි — DDP version එක roadmap එකේ.
 
+### 4B training (flagship)
+
+```bash
+pip install bitsandbytes   # 8-bit optimizer සඳහා
+
+python train.py --config rs-gpt-4b \
+    --data data/tokens_32k.npy \
+    --tokenizer tokenizer/rs_sp_32k.model \
+    --out-dir runs/rs-gpt-4b \
+    --optim adamw8bit --grad-checkpoint \
+    --steps 38000 --batch-size 8 --grad-accum 64 \
+    --lr 2e-4 --min-lr 2e-5 --warmup 800 \
+    --log-interval 10 --eval-interval 500 --sample-every 2000 --save-every 1000
+```
+
+* tokens/step = 8 × 64 × 2048 ≈ 1.05M → 38k steps ≈ 40B tokens (Chinchilla-lite for 4B)
+* Inference: bf16 ~7.9GB (A100/RTX 4090 OK), Q4 GGUF නම් ~2.3GB → phone එකකටත්! (GGUF export = roadmap)
+* Server එකට දාන්න: `RS_CKPT=runs/rs-gpt-4b/ckpt.pt python server/main.py`
+
 ### පියවර 5 — Chat fine-tuning (optional)
 
 Pretrain වලින් පස්සේ `<|user|>/<|assistant|>/<|end|>` format එකේ
@@ -140,7 +176,9 @@ model/
 
 ## Roadmap
 
-- [ ] DDP multi-GPU training
+- [x] 8-bit optimizer (`--optim adamw8bit`) — 4B training on A100-40GB
+- [x] Gradient checkpointing (`--grad-checkpoint`)
+- [ ] DDP multi-GPU training (4B Chinchilla-scale සඳහා අවශ්‍යයි)
 - [ ] GGUF export (llama.cpp) → phone එකේ on-device run
 - [ ] Eval harness (Sinhala benchmarks)
 - [ ] Streaming generation in server

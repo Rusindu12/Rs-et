@@ -63,7 +63,7 @@ def get_lr(step, warmup_steps, max_steps, max_lr, min_lr):
     return min_lr + coeff * (max_lr - min_lr)
 
 
-def configure_optimizer(model: GPT, lr: float, weight_decay: float):
+def configure_optimizer(model: GPT, lr: float, weight_decay: float, optim: str = "adamw"):
     """AdamW with weight decay only on >=2D weights (matrices), nanoGPT style."""
     decay, no_decay = [], []
     for _, p in model.named_parameters():
@@ -72,6 +72,13 @@ def configure_optimizer(model: GPT, lr: float, weight_decay: float):
         {"params": decay, "weight_decay": weight_decay},
         {"params": no_decay, "weight_decay": 0.0},
     ]
+    if optim == "adamw8bit":
+        # 8-bit AdamW: optimizer states use ~75% less VRAM — key for 4B+ models
+        try:
+            import bitsandbytes as bnb
+        except ImportError as e:
+            raise SystemExit("--optim adamw8bit requires:  pip install bitsandbytes") from e
+        return bnb.optim.AdamW8bit(groups, lr=lr, betas=(0.9, 0.95), eps=1e-8)
     return torch.optim.AdamW(groups, lr=lr, betas=(0.9, 0.95), eps=1e-8, fused=torch.cuda.is_available())
 
 
@@ -94,6 +101,10 @@ def main():
     ap.add_argument("--warmup", type=int, default=50)
     ap.add_argument("--weight-decay", type=float, default=0.1)
     ap.add_argument("--grad-clip", type=float, default=1.0)
+    ap.add_argument("--optim", default="adamw", choices=["adamw", "adamw8bit"],
+                    help="adamw8bit (bitsandbytes) cuts optimizer VRAM ~75%% — for 4B on A100-40GB")
+    ap.add_argument("--grad-checkpoint", action="store_true",
+                    help="activation checkpointing: much less VRAM, ~30%% slower — for 4B+ models")
     ap.add_argument("--log-interval", type=int, default=10)
     ap.add_argument("--eval-interval", type=int, default=100)
     ap.add_argument("--sample-every", type=int, default=100)
@@ -136,11 +147,20 @@ def main():
         model.load_state_dict(ckpt["model"])
         print(f"[resume] loaded {args.resume} @ step {ckpt.get('step')}")
 
-    opt = configure_optimizer(model, args.lr, args.weight_decay)
+    opt = configure_optimizer(model, args.lr, args.weight_decay, args.optim)
+    if args.grad_checkpoint:
+        model.grad_checkpointing = True
+        print("[model] gradient checkpointing: ON")
 
     use_amp = device == "cuda"
-    amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-    scaler = torch.amp.GradScaler("cuda", enabled=(use_amp and amp_dtype == torch.float16))
+    amp_dtype = torch.float16
+    if use_amp:
+        amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    amp_enabled = use_amp and amp_dtype == torch.float16
+    try:  # torch >= 2.3
+        scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+    except AttributeError:  # torch <= 2.2
+        scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
 
     def estimate_val_loss():
         model.eval()
