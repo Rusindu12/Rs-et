@@ -11,6 +11,7 @@ Modes (web UI / app selectable):
 Chain strategy: try the external provider first; on error fall back to local RS-GPT.
 """
 
+import json
 import os
 from urllib.parse import quote
 
@@ -125,6 +126,57 @@ class OpenAICompatibleProvider(Provider):
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip()
 
+    def chat_stream(self, message, max_tokens=512, temperature=0.7, system=None,
+                    attachments=None, model_override=None):
+        """Yields content delta strings via SSE (OpenAI stream format)."""
+        model = model_override or self.model
+        images = [a for a in (attachments or []) if a.get("kind") == "image"]
+        if images:
+            model = model_override or vision_model_for(self)
+            content = [{"type": "text", "text": message}]
+            for a in images:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{a['mime']};base64,{a['data_b64']}"},
+                })
+            user_msg = {"role": "user", "content": content}
+        else:
+            user_msg = {"role": "user", "content": message}
+
+        with requests.post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system or SYSTEM_PROMPT},
+                    user_msg,
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": True,
+            },
+            timeout=self.timeout,
+            stream=True,
+        ) as r:
+            r.raise_for_status()
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(data)["choices"][0].get("delta", {})
+                    chunk = delta.get("content")
+                    if chunk:
+                        yield chunk
+                except (ValueError, KeyError, IndexError):
+                    continue
+
     def generate_image(self, prompt, model=None, timeout=120):
         """OpenAI images API (used when RS_IMAGE_MODEL is set)."""
         r = requests.post(
@@ -175,6 +227,40 @@ class GeminiProvider(Provider):
         )
         r.raise_for_status()
         return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+    def chat_stream(self, message, max_tokens=512, temperature=0.7, system=None,
+                    attachments=None, model_override=None):
+        """Yields content delta strings via Gemini SSE (streamGenerateContent)."""
+        model = model_override or self.model
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:streamGenerateContent?alt=sse&key={self.api_key}"
+        )
+        parts = [{"text": message}]
+        for a in (attachments or []):
+            if a.get("kind") == "image":
+                parts.append({"inline_data": {"mime_type": a["mime"], "data": a["data_b64"]}})
+        with requests.post(
+            url,
+            json={
+                "systemInstruction": {"parts": [{"text": system or SYSTEM_PROMPT}]},
+                "contents": [{"role": "user", "parts": parts}],
+                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature},
+            },
+            timeout=self.timeout,
+            stream=True,
+        ) as r:
+            r.raise_for_status()
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                try:
+                    j = json.loads(line[5:].strip())
+                    for pt in j["candidates"][0]["content"]["parts"]:
+                        if "text" in pt:
+                            yield pt["text"]
+                except (ValueError, KeyError, IndexError):
+                    continue
 
 
 def think_model_for(p: Provider) -> str:

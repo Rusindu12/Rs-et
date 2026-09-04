@@ -71,9 +71,28 @@ p = subprocess.Popen(["python","-m","uvicorn","server.main:app","--host","0.0.0.
 | 💻 Desktop | Chrome/Edge → address bar → **Install icon** |
 | 🔌 Programmers | `/v1/chat/completions` — OpenAI SDK compatible |
 
-**Third-party OpenAI-compatible apps** (ChatBox, Typebot, Raycast AI, ...):
+**Third-party OpenAI-compatible apps** (ChatBox, Typebot, Raycast AI, Open WebUI, LibreChat...):
 - Base URL: `https://your-host/v1`
 - API Key: `RS_API_TOKEN` එක (නැත්නම් onna ama value)
+- Model: `rs-gpt` (server `/v1/models` endpoint එකෙන් list වෙනවා)
+- ✅ **Streaming (`stream: true`)** — SSE supported: OpenAI format `/v1/chat/completions`
+  සහ RS format `/chat` — app කෑල්ල real-time type-writer effect එකක් ගන්න පුළුවන්
+
+## 🌐 Website එකකට RS AI දාන්න (1 line)
+
+```html
+<script src="https://your-host/static/widget.js"></script>
+```
+
+නිල/ demo: `https://your-host/widget-demo` — floating 🤖 bubble එකක් ඕනම site එකක.
+Token: `<script src="..." data-token="RS_API_TOKEN"></script>`
+
+## ⚡ Easy GET (Shortcuts/Tasker/browsers)
+
+```
+GET /ask?q=ආයුබෝවන්&token=RS_API_TOKEN
+→ {"reply": "...", "provider": "..."}
+```
 
 **curl:**
 ```bash

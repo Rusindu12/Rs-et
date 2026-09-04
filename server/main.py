@@ -15,6 +15,7 @@ Run:
 
 import base64
 import io
+import json
 import os
 import re
 import sys
@@ -23,9 +24,10 @@ from pathlib import Path
 
 import torch
 import sentencepiece as spm
+import torch.nn.functional as F
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -95,6 +97,35 @@ def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8) -
     for stop in ("<|end|>", "<|user|>"):
         text = text.split(stop)[0]
     return text.strip() or "…"
+
+
+def local_reply_stream(message: str, max_tokens: int = 200, temperature: float = 0.8):
+    """Token-by-token streaming from the local model (yields text deltas)."""
+    prompt = f"<|user|>\n{message.strip()}\n<|assistant|>\n"
+    ids = sp.encode(prompt)
+    idx = torch.tensor(ids, dtype=torch.long)[None, :]
+    with torch.no_grad():
+        prev = ""
+        for _ in range(min(max_tokens, MAX_TOKENS_CAP)):
+            idx_cond = idx[:, -cfg.block_size:]
+            logits, _ = model(idx_cond)
+            logits = logits[:, -1, :] / max(temperature, 1e-5)
+            v, _ = torch.topk(logits, min(50, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = float("-inf")
+            probs = F.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, next_id), dim=1)
+            txt = sp.decode(idx[0][len(ids):].tolist())
+            for stop in ("<|end|>", "<|user|>"):
+                if stop in txt:
+                    final = txt.split(stop)[0]
+                    if len(final) > len(prev):
+                        yield final[len(prev):]
+                    return
+            delta = txt[len(prev):]
+            if delta:
+                yield delta
+                prev = txt
 
 
 CHAIN = build_chain(local_reply)
@@ -214,6 +245,84 @@ def smart_reply(message, mode, atts, max_tokens, temperature):
     return {"reply": prefix + "⚠️ සියලුම providers අසාර්ථකයි.", "provider": "none", "mode": mode}
 
 
+def smart_reply_stream(message, mode, atts, max_tokens, temperature):
+    """Yields (delta_text, provider_name) tuples for SSE streaming.
+
+    chat/think stream token-by-token; research/image yield one final block."""
+    parts, images, notes = prepare_attachments(atts)
+    full_msg = ("\n\n".join(parts + [message])) if parts else message
+    prefix = _notes_block(notes)
+    if prefix:
+        yield prefix, "images" if images else "files"
+
+    if mode in ("research", "image"):
+        # non-streaming by nature — emit final result as one delta
+        result = smart_reply(message, mode, atts, max_tokens, temperature)
+        yield result["reply"][len(prefix):] if result["reply"].startswith(prefix) else result["reply"], result["provider"]
+        return
+
+    want_think = mode in ("think", "think_harder")
+    for p in CHAIN:
+        try:
+            if p.family == "local" and images:
+                note = ("📷 Photos analyze කරනא smart mode ඕන. දැනට text:\n\n")
+                yield note, p.name
+            if want_think and p.family == "local":
+                yield "💡 smart mode ඕන thinking වලට. Local:\n\n", p.name
+            mt = int(max_tokens * (2.5 if mode == "think_harder" else 1.5 if want_think else 1))
+            mt = min(mt, 2000)
+            temp = 0.5 if mode == "think_harder" else 0.6 if want_think else temperature
+            if p.family == "local":
+                for delta in local_reply_stream(full_msg, min(mt, MAX_TOKENS_CAP), temp):
+                    yield delta, p.name
+            else:
+                tm = think_model_for(p) if want_think else None
+                sys_p = THINK_PROMPT if want_think else None
+                pkey = f"{p.key}/{tm}" if want_think else p.name
+                for delta in p.chat_stream(full_msg, mt, temp, system=sys_p,
+                                           attachments=images or None, model_override=tm):
+                    yield delta, pkey
+            return
+        except Exception as e:  # noqa: BLE001
+            print(f"[stream] {p.name} failed: {e!r} -> next")
+    yield "⚠️ සියලුම providers අසාර්ථකයි.", "none"
+
+
+def _openai_sse(stream_gen, model_id: str):
+    """OpenAI chat.completion.chunk SSE format."""
+    cid = f"chatcmpl-{int(time.time())}"
+    provider = "unknown"
+    first = True
+    for delta, prov in stream_gen:
+        provider = prov
+        role = {"role": "assistant"} if first else {}
+        first = False
+        chunk = {
+            "id": cid, "object": "chat.completion.chunk",
+            "created": int(time.time()), "model": model_id,
+            "provider": provider,
+            "choices": [{"index": 0, "delta": {**role, "content": delta},
+                         "finish_reason": None}],
+        }
+        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+    end = {
+        "id": cid, "object": "chat.completion.chunk",
+        "created": int(time.time()), "model": model_id, "provider": provider,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(end, ensure_ascii=False)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+def _rs_sse(stream_gen):
+    """Simple RS AI SSE format for /chat?stream=true: data: {"delta": ...} then {"done": ...}."""
+    provider = "unknown"
+    for delta, prov in stream_gen:
+        provider = prov
+        yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'done': True, 'provider': provider}, ensure_ascii=False)}\n\n"
+
+
 # --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
@@ -243,6 +352,7 @@ class ChatRequest(BaseModel):
     max_tokens: int = 400
     temperature: float = 0.8
     top_p: float = 0.9
+    stream: bool = False
 
 
 @app.get("/health")
@@ -262,10 +372,14 @@ def health():
 @app.post("/chat")
 def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
     _require_token(authorization)
-    t0 = time.time()
     mode = (req.mode or "chat").lower()
     if mode not in MODES:
         mode = "chat"
+    if req.stream:
+        gen = smart_reply_stream(req.message, mode, req.attachments,
+                                 req.max_tokens, req.temperature)
+        return StreamingResponse(_rs_sse(gen), media_type="text/event-stream")
+    t0 = time.time()
     result = smart_reply(req.message, mode, req.attachments, req.max_tokens, req.temperature)
     result["latency_ms"] = int((time.time() - t0) * 1000)
     return result
@@ -281,6 +395,7 @@ class OAIRequest(BaseModel):
     messages: list[OAIMessage]
     max_tokens: int = 400
     temperature: float = 0.8
+    stream: bool = False
 
 
 @app.post("/v1/chat/completions")
@@ -288,6 +403,14 @@ def openai_chat(req: OAIRequest, authorization: str | None = Header(default=None
     _require_token(authorization)
     user_msgs = [m.content for m in req.messages if m.role == "user"]
     message = user_msgs[-1] if user_msgs else ""
+    if req.stream:
+        gen = smart_reply_stream(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP),
+                                 req.temperature)
+        return StreamingResponse(
+            _openai_sse(gen, req.model),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     result = smart_reply(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP), req.temperature)
     return {
         "id": f"chatcmpl-{int(time.time())}",
@@ -302,6 +425,74 @@ def openai_chat(req: OAIRequest, authorization: str | None = Header(default=None
         }],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
+
+
+# --------------------------------------------------------------------------- #
+# Universal access: /v1/models, GET /ask, embeddable widget
+# --------------------------------------------------------------------------- #
+
+@app.get("/v1/models")
+def list_models():
+    """OpenAI-compatible model list — needed by ChatBox / Open WebUI / etc."""
+    data = [{
+        "id": "rs-gpt", "object": "model",
+        "created": 1757000000, "owned_by": "rs-team",
+    }]
+    if CHAIN and CHAIN[0].name != "rs-gpt-local":
+        data.append({
+            "id": CHAIN[0].name, "object": "model",
+            "created": 1757000000, "owned_by": CHAIN[0].key or "external",
+        })
+    return {"object": "list", "data": data}
+
+
+@app.get("/ask")
+def ask_get(q: str, mode: str = "chat", max_tokens: int = 300,
+            token: str | None = None,
+            authorization: str | None = Header(default=None)):
+    """Easy GET endpoint — great for iOS Shortcuts, Tasker, browser links.
+
+    Auth: header Bearer token OR ?token= query param (if RS_API_TOKEN set)."""
+    server_tok = os.environ.get("RS_API_TOKEN")
+    if server_tok and authorization != f"Bearer {server_tok}" and token != server_tok:
+        raise HTTPException(status_code=401, detail="token required")
+    t0 = time.time()
+    mode = mode if mode in MODES else "chat"
+    result = smart_reply(q, mode, [], min(max_tokens, 1000), 0.7)
+    result["latency_ms"] = int((time.time() - t0) * 1000)
+    return result
+
+
+WIDGET_DEMO_HTML = r"""<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RS AI Widget Demo</title>
+<style>
+  body { font-family: system-ui; background: #0f172a; color: #e2e8f0; padding: 40px; max-width: 720px; margin: auto; }
+  h1 { color: #a78bfa; }
+  pre { background: #1e293b; padding: 14px; border-radius: 10px; overflow-x: auto; font-size: 14px; }
+  code { color: #c4b5fd; }
+  p { line-height: 1.7; }
+</style>
+</head>
+<body>
+<h1>RS AI Widget 🤖</h1>
+<p>ඔයාගේ website එකට RS AI add කරන්න — <b>script tag එකක්යි ඕන</b>. මේ page එකේම පහළින් දකුණු කෙළවරේ live widget එක බලන්න:</p>
+<pre><code>&lt;script src="YOUR_SERVER/static/widget.js"&gt;&lt;/script&gt;</code></pre>
+<p>Token protected server නම්:</p>
+<pre><code>&lt;script src="YOUR_SERVER/static/widget.js" data-token="YOUR_RS_API_TOKEN"&gt;&lt;/script&gt;</code></pre>
+<p>CORS open නිසා ඕනම domain එකකින් වැඩ කරයි. Production වලදී main.py වල allow_origins එක custom කරන්න.</p>
+<script src="/static/widget.js"></script>
+</body>
+</html>
+"""
+
+
+@app.get("/widget-demo", response_class=HTMLResponse)
+def widget_demo():
+    return WIDGET_DEMO_HTML
 
 
 CHAT_HTML = r"""<!DOCTYPE html>

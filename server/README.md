@@ -98,7 +98,14 @@ response: `{"reply","provider","mode","image_url"?,"sources"?,"latency_ms"}`
 
 ## Endpoints
 
-- `GET  /` — web chat UI
+- `GET  /` — web chat UI (PWA)
 - `GET  /health` — model + provider chain info
-- `POST /chat` — `{"message": "...", "max_tokens": 400, "temperature": 0.8}`
-- `POST /v1/chat/completions` — OpenAI-compatible
+- `POST /chat` — full API: `{"message","mode","attachments","stream"}`
+- `POST /v1/chat/completions` — OpenAI-compatible (+ `stream: true` SSE ✅)
+- `GET  /v1/models` — OpenAI model list (ChatBox/Open WebUI connect)
+- `GET  /ask?q=...` — easy GET (iOS Shortcuts / Tasker / browser)
+- `GET  /widget-demo` — embeddable widget demo
+- `GET  /static/widget.js` — any website එකට chat bubble (script tag 1)
+
+**Streaming:** `/chat` or `/v1/chat/completions` වල `"stream": true` → SSE
+token-by-token (external providers ගෙන් pass-through, local model token loop).
