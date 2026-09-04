@@ -1,0 +1,43 @@
+name: Python CI
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "server/**"
+      - "model/**"
+      - "train/**"
+      - "eval/**"
+      - ".github/workflows/python-ci.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Syntax + server smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax-check all python files
+        run: python -m compileall -q server model train eval && echo "syntax OK"
+
+      - name: Smoke test server (with the bundled demo checkpoint)
+        run: |
+          pip install --quiet fastapi "uvicorn[standard]" sentencepiece requests "torch==2.2.2" \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple
+          RS_FORCE_CPU=1 python -m uvicorn server.main:app --host 127.0.0.1 --port 8123 &
+          sleep 12
+          curl -sf http://127.0.0.1:8123/health
+          curl -sf -X POST http://127.0.0.1:8123/chat \
+            -H "Content-Type: application/json" \
+            -d '{"message": "hello", "history": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello!"}], "max_tokens": 20}'
+          curl -sf "http://127.0.0.1:8123/ask?q=test"
+          echo "smoke test OK"

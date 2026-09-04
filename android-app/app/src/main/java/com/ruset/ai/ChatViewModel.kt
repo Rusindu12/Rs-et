@@ -43,6 +43,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         ChatMessage("ආයුබෝවන්! 👋 මම RS AI. උඩ mode එකක් තෝරන්න — chat, thinking, research, image 🎨. Photos/files attach කරන්නත්, 🎙️ voice වලින් අහන්නත් පුළුවන්!", false)
     )
     val attachments = mutableStateListOf<PendingAttachment>()
+
+    fun clearChat() {
+        attachments.clear()
+        messages.clear()
+        messages.add(
+            ChatMessage("ආයුබෝවන්! 👋 අලුතෙන් පටන් ගමු — මම RS AI 🤖", false)
+        )
+    }
     var selectedMode by mutableStateOf("chat")
     var isTyping by mutableStateOf(false)
         private set
@@ -126,6 +134,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         attachments.clear()
         val mode = selectedMode
 
+        // conversation memory: send the last 10 turns with each request
+        val history = messages.takeLast(10)
+            .filter { it.text.isNotBlank() }
+            .map { HistoryMsg(if (it.isUser) "user" else "assistant", it.text.take(1500)) }
+
         messages.add(
             ChatMessage(
                 if (atts.isEmpty()) msg else msg + "\n📎 ${atts.size} attachment(s)",
@@ -141,7 +154,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     msg.ifEmpty { "(attachment)" },
                     apiToken,
                     mode,
-                    atts.map { Attachment(it.name, it.kind, it.mime, it.dataB64) }
+                    atts.map { Attachment(it.name, it.kind, it.mime, it.dataB64) },
+                    history
                 )
                 messages.add(ChatMessage(r.reply, false, r.image_url, r.sources))
             } catch (e: Exception) {

@@ -78,6 +78,11 @@ p = subprocess.Popen(["python","-m","uvicorn","server.main:app","--host","0.0.0.
 - ✅ **Streaming (`stream: true`)** — SSE supported: OpenAI format `/v1/chat/completions`
   සහ RS format `/chat` — app කෑල්ල real-time type-writer effect එකක් ගන්න පුළුවන්
 
+## 🧠 Conversation memory ✅
+
+All clients (web/app/OpenAI clients) ද ග්‍රල්කරන conversation history එක යවයි —
+RS AI context මතක තියාගනියයි. Server-side stateless — privacy-friendly.
+
 ## 🌐 Website එකකට RS AI දාන්න (1 line)
 
 ```html

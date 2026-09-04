@@ -27,7 +27,7 @@ import sentencepiece as spm
 import torch.nn.functional as F
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -38,10 +38,10 @@ from model.gpt import GPT, GPTConfig  # noqa: E402
 
 try:
     from . import research
-    from .providers import build_chain, generate_image, think_model_for, THINK_PROMPT
+    from .providers import build_chain, generate_image, think_model_for, THINK_PROMPT, clean_history
 except ImportError:
     import research
-    from providers import build_chain, generate_image, think_model_for, THINK_PROMPT
+    from providers import build_chain, generate_image, think_model_for, THINK_PROMPT, clean_history
 
 CKPT = os.environ.get("RS_CKPT", str(ROOT / "model" / "runs" / "demo" / "ckpt.pt"))
 TOKENIZER = os.environ.get("RS_TOKENIZER", None)
@@ -70,11 +70,13 @@ _load_dotenv()
 # Load local RS-GPT model
 # --------------------------------------------------------------------------- #
 
-print(f"[server] loading checkpoint: {CKPT}")
-ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
+DEVICE = "cuda" if torch.cuda.is_available() and os.environ.get("RS_FORCE_CPU") != "1" else "cpu"
+print(f"[server] loading checkpoint: {CKPT} (device: {DEVICE})")
+ckpt = torch.load(CKPT, map_location=DEVICE, weights_only=False)
 cfg = GPTConfig(**ckpt["config"])
 model = GPT(cfg)
 model.load_state_dict(ckpt["model"])
+model.to(DEVICE)
 model.eval()
 torch.set_num_threads(max(1, os.cpu_count() or 1))
 
@@ -85,10 +87,20 @@ N_PARAMS = model.num_params()
 print(f"[server] local model ready — {N_PARAMS:,} params | vocab {cfg.vocab_size} | ctx {cfg.block_size}")
 
 
-def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8) -> str:
-    prompt = f"<|user|>\n{message.strip()}\n<|assistant|>\n"
+def _history_prompt(message: str, history) -> str:
+    """Multi-turn prompt — recent <|user|>/<|assistant|> turns stitched in."""
+    out = ""
+    for h in (history or [])[-8:]:
+        tag = "<|user|>" if h.get("role") == "user" else "<|assistant|>"
+        out += f"{tag}\n{str(h.get('content', '')).strip()[:600]}\n<|end|>\n"
+    return out + f"<|user|>\n{message.strip()}\n<|assistant|>\n"
+
+
+def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8,
+                history=None) -> str:
+    prompt = _history_prompt(message, history)
     ids = sp.encode(prompt)
-    idx = torch.tensor(ids, dtype=torch.long)[None, :]
+    idx = torch.tensor(ids, dtype=torch.long)[None, :].to(DEVICE)
     with torch.no_grad():
         out = model.generate(idx, max_new_tokens=min(max_tokens, MAX_TOKENS_CAP),
                              temperature=temperature, top_k=50, top_p=0.9,
@@ -99,11 +111,12 @@ def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8) -
     return text.strip() or "…"
 
 
-def local_reply_stream(message: str, max_tokens: int = 200, temperature: float = 0.8):
+def local_reply_stream(message: str, max_tokens: int = 200, temperature: float = 0.8,
+                       history=None):
     """Token-by-token streaming from the local model (yields text deltas)."""
-    prompt = f"<|user|>\n{message.strip()}\n<|assistant|>\n"
+    prompt = _history_prompt(message, history)
     ids = sp.encode(prompt)
-    idx = torch.tensor(ids, dtype=torch.long)[None, :]
+    idx = torch.tensor(ids, dtype=torch.long)[None, :].to(DEVICE)
     with torch.no_grad():
         prev = ""
         for _ in range(min(max_tokens, MAX_TOKENS_CAP)):
@@ -185,7 +198,8 @@ def _notes_block(notes):
     return ("\n".join(notes) + "\n\n") if notes else ""
 
 
-def smart_reply(message, mode, atts, max_tokens, temperature):
+def smart_reply(message, mode, atts, max_tokens, temperature, history=None, system=None):
+    hist = clean_history(history)
     parts, images, notes = prepare_attachments(atts)
     full_msg = ("\n\n".join(parts + [message])) if parts else message
     prefix = _notes_block(notes)
@@ -200,7 +214,7 @@ def smart_reply(message, mode, atts, max_tokens, temperature):
     if mode == "research":
         reply, sources, prov = research.run_research(CHAIN, full_msg)
         if reply is None:
-            fb = local_reply(full_msg, min(max_tokens, 300), temperature)
+            fb = local_reply(full_msg, min(max_tokens, 300), temperature, history=hist)
             return {
                 "reply": prefix + "🔬 Web research එකට smart mode (Groq/Gemini key) + internet ඕන. Local model එකෙන්:\n\n" + fb,
                 "provider": "rs-gpt-local", "mode": mode,
@@ -218,11 +232,12 @@ def smart_reply(message, mode, atts, max_tokens, temperature):
                 if p.family == "local":
                     note = ("💡 Thinking modes වලට smart mode ඕන "
                             "(Groq free key → server/.env). Local උත්තරය:\n\n")
-                    return {"reply": prefix + note + p.chat(full_msg, max_tokens, temperature),
+                    return {"reply": prefix + note + p.chat(full_msg, max_tokens, temperature,
+                                                              history=hist, system=system),
                             "provider": p.name, "mode": mode}
                 tm = think_model_for(p)
                 reply = p.chat(full_msg, want_tokens, want_temp,
-                               system=THINK_PROMPT, model_override=tm)
+                               system=THINK_PROMPT, model_override=tm, history=hist)
                 return {"reply": prefix + reply, "provider": f"{p.key}/{tm}", "mode": mode}
             except Exception as e:  # noqa: BLE001
                 print(f"[modes] think via {p.name} failed: {e!r}")
@@ -235,57 +250,66 @@ def smart_reply(message, mode, atts, max_tokens, temperature):
             if images and p.family == "local":
                 img_note = ("📷 Photos analyze කරන්න smart mode ඕන (vision model — "
                             "Groq/Gemini free key). දැනට text විතරයි:\n\n")
-                return {"reply": prefix + img_note + p.chat(full_msg, max_tokens, temperature),
+                return {"reply": prefix + img_note + p.chat(full_msg, max_tokens, temperature,
+                                                              history=hist, system=system),
                         "provider": p.name, "mode": mode}
             return {"reply": prefix + p.chat(full_msg, max_tokens, temperature,
-                                             attachments=images or None),
+                                             attachments=images or None,
+                                             history=hist, system=system),
                     "provider": p.name, "mode": mode}
         except Exception as e:  # noqa: BLE001
             print(f"[modes] {p.name} failed: {e!r} -> next")
     return {"reply": prefix + "⚠️ සියලුම providers අසාර්ථකයි.", "provider": "none", "mode": mode}
 
 
-def smart_reply_stream(message, mode, atts, max_tokens, temperature):
-    """Yields (delta_text, provider_name) tuples for SSE streaming.
+def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=None):
+    """Yields (delta_text, provider_name, meta|None) triples for SSE streaming.
 
-    chat/think stream token-by-token; research/image yield one final block."""
+    chat/think stream token-by-token; research/image yield one final block
+    (meta carries image_url/sources so streaming clients can render them)."""
+    hist = clean_history(history)
     parts, images, notes = prepare_attachments(atts)
     full_msg = ("\n\n".join(parts + [message])) if parts else message
     prefix = _notes_block(notes)
     if prefix:
-        yield prefix, "images" if images else "files"
+        yield prefix, "images" if images else "files", None
 
     if mode in ("research", "image"):
         # non-streaming by nature — emit final result as one delta
-        result = smart_reply(message, mode, atts, max_tokens, temperature)
-        yield result["reply"][len(prefix):] if result["reply"].startswith(prefix) else result["reply"], result["provider"]
+        result = smart_reply(message, mode, atts, max_tokens, temperature,
+                             history=hist)
+        text = result["reply"][len(prefix):] if result["reply"].startswith(prefix) else result["reply"]
+        meta = {k: result[k] for k in ("image_url", "sources") if result.get(k)}
+        yield text, result["provider"], (meta or None)
         return
 
     want_think = mode in ("think", "think_harder")
     for p in CHAIN:
         try:
             if p.family == "local" and images:
-                note = ("📷 Photos analyze කරනא smart mode ඕන. දැනට text:\n\n")
-                yield note, p.name
+                note = ("📷 Photos analyze කරනා smart mode ඕන. දැනට text:\n\n")
+                yield note, p.name, None
             if want_think and p.family == "local":
-                yield "💡 smart mode ඕන thinking වලට. Local:\n\n", p.name
+                yield "💡 smart mode ඕන thinking වලට. Local:\n\n", p.name, None
             mt = int(max_tokens * (2.5 if mode == "think_harder" else 1.5 if want_think else 1))
             mt = min(mt, 2000)
             temp = 0.5 if mode == "think_harder" else 0.6 if want_think else temperature
             if p.family == "local":
-                for delta in local_reply_stream(full_msg, min(mt, MAX_TOKENS_CAP), temp):
-                    yield delta, p.name
+                for delta in local_reply_stream(full_msg, min(mt, MAX_TOKENS_CAP), temp,
+                                                history=hist):
+                    yield delta, p.name, None
             else:
                 tm = think_model_for(p) if want_think else None
                 sys_p = THINK_PROMPT if want_think else None
                 pkey = f"{p.key}/{tm}" if want_think else p.name
                 for delta in p.chat_stream(full_msg, mt, temp, system=sys_p,
-                                           attachments=images or None, model_override=tm):
-                    yield delta, pkey
+                                           attachments=images or None, model_override=tm,
+                                           history=hist):
+                    yield delta, pkey, None
             return
         except Exception as e:  # noqa: BLE001
             print(f"[stream] {p.name} failed: {e!r} -> next")
-    yield "⚠️ සියලුම providers අසාර්ථකයි.", "none"
+    yield "⚠️ සියලුම providers අසාර්ථකයි.", "none", None
 
 
 def _openai_sse(stream_gen, model_id: str):
@@ -293,7 +317,7 @@ def _openai_sse(stream_gen, model_id: str):
     cid = f"chatcmpl-{int(time.time())}"
     provider = "unknown"
     first = True
-    for delta, prov in stream_gen:
+    for delta, prov, _meta in stream_gen:
         provider = prov
         role = {"role": "assistant"} if first else {}
         first = False
@@ -315,12 +339,17 @@ def _openai_sse(stream_gen, model_id: str):
 
 
 def _rs_sse(stream_gen):
-    """Simple RS AI SSE format for /chat?stream=true: data: {"delta": ...} then {"done": ...}."""
+    """Simple RS AI SSE format for /chat?stream=true: data: {"delta": ...} then {"done": ..., meta}."""
     provider = "unknown"
-    for delta, prov in stream_gen:
+    meta = {}
+    for delta, prov, m in stream_gen:
         provider = prov
+        if m:
+            meta.update(m)
         yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
-    yield f"data: {json.dumps({'done': True, 'provider': provider}, ensure_ascii=False)}\n\n"
+    done = {"done": True, "provider": provider}
+    done.update(meta)
+    yield f"data: {json.dumps(done, ensure_ascii=False)}\n\n"
 
 
 # --------------------------------------------------------------------------- #
@@ -329,6 +358,24 @@ def _rs_sse(stream_gen):
 
 app = FastAPI(title="RS AI", version="1.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Per-IP rate limit for chat endpoints (RS_RATE_LIMIT_PER_MIN, 0 = off)
+RATE_LIMIT = int(os.environ.get("RS_RATE_LIMIT_PER_MIN", "0") or "0")
+_rate_hits: dict = {}
+
+
+@app.middleware("http")
+async def _rate_limit_mw(request, call_next):
+    if RATE_LIMIT > 0 and request.url.path.startswith(("/chat", "/v1/", "/ask")):
+        fwd = request.headers.get("x-forwarded-for") or getattr(request.client, "host", "?")
+        bucket = f"{fwd.split(',')[0].strip()}:{int(time.time() // 60)}"
+        if len(_rate_hits) > 20000:
+            _rate_hits.clear()
+        _rate_hits[bucket] = _rate_hits.get(bucket, 0) + 1
+        if _rate_hits[bucket] > RATE_LIMIT:
+            return JSONResponse({"detail": f"Rate limit exceeded ({RATE_LIMIT}/min)."},
+                                status_code=429)
+    return await call_next(request)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 
@@ -345,10 +392,16 @@ class Attachment(BaseModel):
     data_b64: str = ""
 
 
+class HistoryMsg(BaseModel):
+    role: str                   # "user" | "assistant"
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
     mode: str = "chat"          # chat | think | think_harder | research | image
     attachments: list[Attachment] = []
+    history: list[HistoryMsg] = []   # conversation memory (recent turns)
     max_tokens: int = 400
     temperature: float = 0.8
     top_p: float = 0.9
@@ -365,7 +418,7 @@ def health():
         "context": cfg.block_size,
         "providers": [p.name for p in CHAIN],
         "active": CHAIN[0].name,
-        "modes": MODES,
+        "modes": MODES, "device": DEVICE, "rate_limit_per_min": RATE_LIMIT,
     }
 
 
@@ -377,10 +430,12 @@ def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
         mode = "chat"
     if req.stream:
         gen = smart_reply_stream(req.message, mode, req.attachments,
-                                 req.max_tokens, req.temperature)
+                                 req.max_tokens, req.temperature,
+                                 history=[h.model_dump() for h in req.history])
         return StreamingResponse(_rs_sse(gen), media_type="text/event-stream")
     t0 = time.time()
-    result = smart_reply(req.message, mode, req.attachments, req.max_tokens, req.temperature)
+    result = smart_reply(req.message, mode, req.attachments, req.max_tokens, req.temperature,
+                         history=[h.model_dump() for h in req.history])
     result["latency_ms"] = int((time.time() - t0) * 1000)
     return result
 
@@ -401,17 +456,24 @@ class OAIRequest(BaseModel):
 @app.post("/v1/chat/completions")
 def openai_chat(req: OAIRequest, authorization: str | None = Header(default=None)):
     _require_token(authorization)
-    user_msgs = [m.content for m in req.messages if m.role == "user"]
-    message = user_msgs[-1] if user_msgs else ""
+    user_idxs = [i for i, m in enumerate(req.messages) if m.role == "user"]
+    q_idx = user_idxs[-1] if user_idxs else len(req.messages) - 1
+    message = req.messages[q_idx].content if req.messages else ""
+    sys_override = next((m.content for m in req.messages if m.role == "system"), None)
+    hist = [
+        {"role": m.role, "content": m.content}
+        for m in req.messages[:q_idx] if m.role in ("user", "assistant")
+    ]
     if req.stream:
         gen = smart_reply_stream(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP),
-                                 req.temperature)
+                                 req.temperature, history=hist)
         return StreamingResponse(
             _openai_sse(gen, req.model),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
-    result = smart_reply(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP), req.temperature)
+    result = smart_reply(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP), req.temperature,
+                         history=hist, system=sys_override)
     return {
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
@@ -577,6 +639,10 @@ CHAT_HTML = r"""<!DOCTYPE html>
     <h1>RS AI</h1>
     <div class="sub"><span class="dot"></span><span id="subtxt">සබැඳිවෙමින්…</span></div>
   </div>
+  <div style="margin-left:auto;display:flex;gap:12px;font-size:19px;cursor:pointer;align-items:center;">
+    <span id="exp" title="Export chat (markdown)">⬇</span>
+    <span id="clr" title="Clear chat">🗑️</span>
+  </div>
 </header>
 <div id="chat">
   <div class="msg bot">ආයුබෝවන්! 👋 මම <b>RS AI</b>. උඩ mode එකක් තෝරන්න — 💬 chat, 💡 thinking, 🔬 research, 🎨 image. Photos/files attach කරන්නත්, 🎙️ voice වලින් අහන්නත් පුළුවන්!</div>
@@ -608,6 +674,8 @@ const sendBtn = document.getElementById('send');
 let mode = 'chat';
 let atts = [];          // {name,kind,mime,data_b64}
 let speakOn = false;
+let convo = [];         // conversation memory [{role, content}]
+let aborter = null;     // AbortController while streaming
 
 inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
@@ -712,6 +780,16 @@ function add(text, cls) {
   const d = document.createElement('div');
   d.className = 'msg ' + cls;
   d.textContent = text;
+  if (cls === 'bot') {
+    d.title = '📋 click to copy';
+    d.onclick = () => {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(d.textContent);
+        d.title = '✅ copied!';
+        setTimeout(() => d.title = '📋 click to copy', 1200);
+      }
+    };
+  }
   chat.appendChild(d);
   chat.scrollTop = chat.scrollHeight;
   return d;
@@ -729,57 +807,102 @@ function typingBubble() {
 }
 
 async function send() {
+  if (aborter) { aborter.abort(); return; }      // ⏹ acts as STOP while streaming
   const text = inp.value.trim();
   if (!text && atts.length === 0) return;
-  if (text) add(text + (atts.length ? `\n📎 ${atts.length} attachment(s)` : ''), 'user');
-  else add(`📎 ${atts.length} attachment(s)`, 'user');
+  add(text ? text + (atts.length ? `\n📎 ${atts.length} attachment(s)` : '')
+           : `📎 ${atts.length} attachment(s)`, 'user');
   inp.value = '';
-  const payload = { message: text || '(attachment)', mode, attachments: atts };
+  const payload = { message: text || '(attachment)', mode, attachments: atts,
+                    history: convo.slice(-10), stream: true };
   atts = []; renderAtts();
-  sendBtn.disabled = true;
+  convo.push({ role: 'user', content: text || '(attachment)' });
+  sendBtn.textContent = '⏹';
+  aborter = new AbortController();
   const t = typingBubble();
+  let bubble = null, acc = '', meta = null;
   try {
     const r = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: aborter.signal
     });
     if (r.status === 401) {
       t.remove();
       add('🔑 API token එක වැරදියි — URL එකට ?token=XXXX දාලා ආයේ open කරන්න', 'bot');
-      return;
+      convo.pop(); return;
     }
-    const j = await r.json();
-    t.remove();
-    if (j.image_url) {
-      const d = add(j.reply || '🎨', 'bot');
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const raw = buf.slice(0, i); buf = buf.slice(i + 2);
+        const line = raw.split('\n').find(l => l.startsWith('data:'));
+        if (!line) continue;
+        let j; try { j = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+        if (j.delta != null) {
+          acc += j.delta;
+          if (!bubble) { t.remove(); bubble = add(acc, 'bot'); }
+          else { bubble.textContent = acc; }
+          chat.scrollTop = chat.scrollHeight;
+        } else if (j.done) meta = j;
+      }
+    }
+    if (!bubble) { t.remove(); bubble = add('…', 'bot'); }
+    if (meta && meta.image_url) {
       const img = document.createElement('img');
       img.loading = 'lazy';
-      img.src = j.image_url;
-      img.onclick = () => window.open(j.image_url, '_blank');
-      d.appendChild(document.createElement('br'));
-      d.appendChild(img);
-    } else {
-      add(j.reply || '…', 'bot');
+      img.src = meta.image_url;
+      img.onclick = () => window.open(meta.image_url, '_blank');
+      bubble.appendChild(document.createElement('br'));
+      bubble.appendChild(img);
     }
-    if (j.sources && j.sources.length) {
-      const s = add('', 'bot');
-      s.innerHTML = '<div class="sources"><b>📚 මූලාශ්‍ර</b></div>';
-      j.sources.forEach(x => {
+    if (meta && meta.sources && meta.sources.length) {
+      const sDiv = document.createElement('div');
+      sDiv.className = 'sources';
+      sDiv.innerHTML = '<b>📚 මූලාශ්‍ර</b>';
+      meta.sources.forEach(x => {
         const a = document.createElement('a');
         a.href = x.url; a.target = '_blank';
         a.textContent = '• ' + x.title;
-        s.querySelector('.sources').appendChild(a);
+        sDiv.appendChild(a);
       });
+      bubble.appendChild(document.createElement('br'));
+      bubble.appendChild(sDiv);
     }
-    chat.scrollTop = chat.scrollHeight;
-    speak(j.reply || '');
+    convo.push({ role: 'assistant', content: acc });
+    speak(acc);
   } catch (e) {
     t.remove();
-    add('⚠️ දෝෂයක්: ' + e.message, 'bot');
+    if (!bubble && !acc) add('⚠️ දෝෂයක්: ' + e.message, 'bot');
+    else if (acc && bubble) bubble.textContent = acc + '\n\n⏹';
+    convo.push({ role: 'assistant', content: acc || '…' });
   }
-  sendBtn.disabled = false;
+  aborter = null;
+  sendBtn.textContent = '➤';
 }
+
+// header actions: export + clear
+document.getElementById('exp').onclick = () => {
+  if (!convo.length) return;
+  const txt = convo.map(m => (m.role === 'user' ? '🧑 ' : '🤖 ') + m.content).join('\n\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['# RS AI Chat\n\n' + txt], { type: 'text/markdown' }));
+  a.download = 'rs-ai-chat.md';
+  a.click();
+};
+document.getElementById('clr').onclick = () => {
+  convo = [];
+  chat.innerHTML = '';
+  add('ආයුබෝවන්! 👋 මම <b>RS AI</b>. අලුතෙන් පටන් ගමු!', 'bot');
+};
+
 </script>
 </body>
 </html>

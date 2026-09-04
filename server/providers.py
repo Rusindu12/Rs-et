@@ -9,6 +9,10 @@ Modes (web UI / app selectable):
   image        -> image generation (OpenAI images API or free Pollinations)
 
 Chain strategy: try the external provider first; on error fall back to local RS-GPT.
+
+Conversation memory: every chat() accepts `history` — a list of
+{"role": "user"|"assistant", "content": str} dicts with the recent turns.
+Clients (web UI / Android) send it with each request so RS AI remembers context.
 """
 
 import json
@@ -51,6 +55,19 @@ VISION_MODELS = {
     "deepseek": "deepseek-chat",
 }
 
+_MAX_HISTORY_CHARS = 4000   # per-turn cap before sending history to providers
+
+
+def clean_history(history):
+    """Validate/normalize client history -> [{role, content}]."""
+    out = []
+    for h in (history or [])[-20:]:
+        role = h.get("role") if isinstance(h, dict) else getattr(h, "role", None)
+        content = h.get("content") if isinstance(h, dict) else getattr(h, "content", None)
+        if role in ("user", "assistant") and content:
+            out.append({"role": role, "content": str(content)[:_MAX_HISTORY_CHARS]})
+    return out
+
 
 class Provider:
     name = "provider"
@@ -58,7 +75,7 @@ class Provider:
     key = ""           # preset key e.g. "groq"
 
     def chat(self, message, max_tokens=400, temperature=0.7, system=None,
-             attachments=None, model_override=None) -> str:
+             attachments=None, model_override=None, history=None) -> str:
         raise NotImplementedError
 
 
@@ -72,8 +89,20 @@ class LocalRSProvider(Provider):
     def __init__(self, reply_fn):
         self._reply_fn = reply_fn
 
-    def chat(self, message, max_tokens=200, temperature=0.8, **kw):
-        return self._reply_fn(message, max_tokens, temperature)
+    def chat(self, message, max_tokens=200, temperature=0.8, history=None, **kw):
+        return self._reply_fn(message, max_tokens, temperature, history=history)
+
+
+def _openai_user_msg(message, images):
+    if images:
+        content = [{"type": "text", "text": message}]
+        for a in images:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{a['mime']};base64,{a['data_b64']}"},
+            })
+        return {"role": "user", "content": content}
+    return {"role": "user", "content": message}
 
 
 class OpenAICompatibleProvider(Provider):
@@ -89,76 +118,51 @@ class OpenAICompatibleProvider(Provider):
         self.model = model
         self.timeout = timeout
 
-    def chat(self, message, max_tokens=512, temperature=0.7, system=None,
-             attachments=None, model_override=None):
+    def _payload(self, message, max_tokens, temperature, system, attachments,
+                 model_override, history):
         model = model_override or self.model
-
         images = [a for a in (attachments or []) if a.get("kind") == "image"]
         if images:
             model = model_override or vision_model_for(self)
-            content = [{"type": "text", "text": message}]
-            for a in images:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{a['mime']};base64,{a['data_b64']}"},
-                })
-            user_msg = {"role": "user", "content": content}
-        else:
-            user_msg = {"role": "user", "content": message}
+        messages = [{"role": "system", "content": system or SYSTEM_PROMPT}]
+        messages.extend(clean_history(history))
+        messages.append(_openai_user_msg(message, images))
+        return model, {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
 
+    def chat(self, message, max_tokens=512, temperature=0.7, system=None,
+             attachments=None, model_override=None, history=None):
+        _, payload = self._payload(message, max_tokens, temperature, system,
+                                   attachments, model_override, history)
         r = requests.post(
             f"{self.base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system or SYSTEM_PROMPT},
-                    user_msg,
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            },
+            json=payload,
             timeout=self.timeout,
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip()
 
     def chat_stream(self, message, max_tokens=512, temperature=0.7, system=None,
-                    attachments=None, model_override=None):
+                    attachments=None, model_override=None, history=None):
         """Yields content delta strings via SSE (OpenAI stream format)."""
-        model = model_override or self.model
-        images = [a for a in (attachments or []) if a.get("kind") == "image"]
-        if images:
-            model = model_override or vision_model_for(self)
-            content = [{"type": "text", "text": message}]
-            for a in images:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{a['mime']};base64,{a['data_b64']}"},
-                })
-            user_msg = {"role": "user", "content": content}
-        else:
-            user_msg = {"role": "user", "content": message}
-
+        _, payload = self._payload(message, max_tokens, temperature, system,
+                                   attachments, model_override, history)
+        payload["stream"] = True
         with requests.post(
             f"{self.base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system or SYSTEM_PROMPT},
-                    user_msg,
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "stream": True,
-            },
+            json=payload,
             timeout=self.timeout,
             stream=True,
         ) as r:
@@ -193,6 +197,22 @@ class OpenAICompatibleProvider(Provider):
         return r.json()["data"][0]["url"]
 
 
+def _gemini_contents(message, history, images):
+    """Gemini contents list: roles must alternate user/model; images attach to last user turn."""
+    contents = []
+    for h in clean_history(history):
+        contents.append({
+            "role": "model" if h["role"] == "assistant" else "user",
+            "parts": [{"text": h["content"]}],
+        })
+    parts = [{"text": message}]
+    for a in (images or []):
+        if a.get("kind") == "image":
+            parts.append({"inline_data": {"mime_type": a["mime"], "data": a["data_b64"]}})
+    contents.append({"role": "user", "parts": parts})
+    return contents
+
+
 class GeminiProvider(Provider):
     """Google AI Studio — native generateContent API."""
 
@@ -205,48 +225,43 @@ class GeminiProvider(Provider):
         self.model = model
         self.timeout = timeout
 
+    def _payload(self, message, max_tokens, temperature, system,
+                 attachments, history):
+        images = [a for a in (attachments or []) if a.get("kind") == "image"]
+        return {
+            "systemInstruction": {"parts": [{"text": system or SYSTEM_PROMPT}]},
+            "contents": _gemini_contents(message, history, images),
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature},
+        }
+
     def chat(self, message, max_tokens=512, temperature=0.7, system=None,
-             attachments=None, model_override=None):
+             attachments=None, model_override=None, history=None):
         model = model_override or self.model
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={self.api_key}"
         )
-        parts = [{"text": message}]
-        for a in (attachments or []):
-            if a.get("kind") == "image":
-                parts.append({"inline_data": {"mime_type": a["mime"], "data": a["data_b64"]}})
         r = requests.post(
             url,
-            json={
-                "systemInstruction": {"parts": [{"text": system or SYSTEM_PROMPT}]},
-                "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature},
-            },
+            json=self._payload(message, max_tokens, temperature, system,
+                               attachments, history),
             timeout=self.timeout,
         )
         r.raise_for_status()
         return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     def chat_stream(self, message, max_tokens=512, temperature=0.7, system=None,
-                    attachments=None, model_override=None):
+                    attachments=None, model_override=None, history=None):
         """Yields content delta strings via Gemini SSE (streamGenerateContent)."""
         model = model_override or self.model
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:streamGenerateContent?alt=sse&key={self.api_key}"
         )
-        parts = [{"text": message}]
-        for a in (attachments or []):
-            if a.get("kind") == "image":
-                parts.append({"inline_data": {"mime_type": a["mime"], "data": a["data_b64"]}})
         with requests.post(
             url,
-            json={
-                "systemInstruction": {"parts": [{"text": system or SYSTEM_PROMPT}]},
-                "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature},
-            },
+            json=self._payload(message, max_tokens, temperature, system,
+                               attachments, history),
             timeout=self.timeout,
             stream=True,
         ) as r:

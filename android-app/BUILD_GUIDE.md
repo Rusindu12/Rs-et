@@ -3,6 +3,12 @@
 Android app එක: Kotlin + Jetpack Compose + Retrofit. RS AI server එකට
 සම්බන්ධ වෙලා chat කරනවා.
 
+## විකල්ප 0: GitHub Actions එකෙන් auto APK (ලේසි — computer එකෙන්ම නැතුව!)
+
+මේ repo එකට workflow එකක් තියෙනවා (`.github/workflows/android.yml`): push ගානකම
+GitHub එකේම **APK build** වෙලා **Actions tab → RS-AI-debug-apk** artifact එකෙන් download.
+Debug-signed — install කරන්න readyම.
+
 ## විකල්ප 1: Android Studio (පහසුම — විනාඩි 5)
 
 1. [Android Studio](https://developer.android.com/studio) install කරන්න (Hedgehog+).

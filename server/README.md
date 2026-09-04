@@ -83,8 +83,19 @@ python server/main.py
 
 Presets (auto per provider): think → groq:`deepseek-r1-distill-llama-70b`, openai:`o4-mini`,
 deepseek:`deepseek-reasoner`; vision → groq:`llama-4-scout-17b`, openai/gemini: default model.
-`/chat` body: `{"message","mode","attachments":[{"name","kind":"image|file","mime","data_b64"}]}`
+`/chat` body: `{"message","mode","attachments":[...],"history":[{"role","content"}],"stream"}`
 response: `{"reply","provider","mode","image_url"?,"sources"?,"latency_ms"}`
+
+## 🧠 Conversation memory
+
+Clients send `history` (last ~10 turns `[{role: user|assistant, content}]`) with each
+request — external providers get full context, local model gets a multi-turn prompt.
+Web UI එකේ/auto; Android app එකේ/auto. Streaming වලත් (`stream:true`) same.
+
+## 🛡️ Extras
+
+- `RS_RATE_LIMIT_PER_MIN=120` — per-IP rate limit (0 = off; applies to /chat /v1/* /ask)
+- GPU auto-detect (cuda තියෙනවා නම් use; `RS_FORCE_CPU=1` to force CPU)
 
 - External provider එකට දෙන system prompt එක: *"You are RS AI... fluent in
   Sinhala and English. Reply in the SAME language the user uses."* → external AI

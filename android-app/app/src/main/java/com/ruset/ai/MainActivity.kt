@@ -134,6 +134,9 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { vm.clearChat() }) {
+                            Text("🗑️", fontSize = 20.sp)
+                        }
                         IconButton(onClick = { showSettings = true }) {
                             Icon(Icons.Default.Settings, "Settings", tint = Lavender)
                         }

@@ -15,10 +15,16 @@ data class Attachment(
     val data_b64: String
 )
 
+data class HistoryMsg(
+    val role: String,       // "user" | "assistant"
+    val content: String
+)
+
 data class ChatRequest(
     val message: String,
     val mode: String = "chat",
     val attachments: List<Attachment>? = null,
+    val history: List<HistoryMsg>? = null,   // conversation memory
     val max_tokens: Int = 400,
     val temperature: Double = 0.8
 )
@@ -75,10 +81,16 @@ object ApiClient {
         message: String,
         token: String = "",
         mode: String = "chat",
-        attachments: List<Attachment>? = null
+        attachments: List<Attachment>? = null,
+        history: List<HistoryMsg>? = null
     ): ChatResponse =
         api(base).chat(
-            ChatRequest(message, mode, if (attachments.isNullOrEmpty()) null else attachments),
+            ChatRequest(
+                message = message,
+                mode = mode,
+                attachments = if (attachments.isNullOrEmpty()) null else attachments,
+                history = if (history.isNullOrEmpty()) null else history
+            ),
             if (token.isBlank()) null else "Bearer $token"
         )
 }
