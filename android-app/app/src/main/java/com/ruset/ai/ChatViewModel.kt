@@ -2,6 +2,7 @@ package com.ruset.ai
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import android.graphics.Bitmap
 import android.net.Uri
 import android.speech.tts.TextToSpeech
@@ -249,7 +250,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return Bitmap.createScaledBitmap(b, (b.width * s).toInt(), (b.height * s).toInt(), true)
     }
 
+    fun testConnection(onResult: (ok: Boolean, detail: String) -> Unit) {
+        viewModelScope.launch {
+            healthCheckRunning.value = true
+            val r = ApiClient.healthCheck(serverUrl)
+            healthCheckRunning.value = false
+            if (r.isSuccess) {
+                val h = r.getOrNull()
+                onResult(true, "✅ Connected! Server: " + (h?.active ?: "rs-gpt") +
+                        " · modes: " + (h?.modes?.joinToString() ?: "-"))
+            } else {
+                onResult(false, "❌ Connect fail: " + (r.exceptionOrNull()?.message ?: ""))
+            }
+        }
+    }
+
+    val healthCheckRunning = mutableStateOf(false)
+
     companion object {
-        const val DEFAULT_URL = "http://10.0.2.2:8000"
+        // emulator 10.0.2.2 works only inside an emulator — real phones get a blank field
+        val DEFAULT_URL: String =
+            if (Build.FINGERPRINT.contains("generic") || Build.MODEL.contains("Emulator")
+                || Build.PRODUCT.contains("sdk_gphone")) "http://10.0.2.2:8000" else ""
     }
 }

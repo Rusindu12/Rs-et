@@ -456,6 +456,8 @@ fun AttachButton(emoji: String, onClick: () -> Unit) {
 fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
     var url by remember { mutableStateOf(vm.serverUrl) }
     var token by remember { mutableStateOf(vm.apiToken) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    val uriHandler2 = LocalUriHandler.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -464,11 +466,20 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
         text = {
             Column {
                 Text(
-                    "RS AI server ලිපිනය.\n" +
-                        "• Emulator: http://10.0.2.2:8000\n" +
+                    "RS AI server ලිපිනය:\n" +
+                        "• Emulator නම්: http://10.0.2.2:8000\n" +
                         "• Phone (Wi-Fi): http://<PC IP>:8000\n" +
-                        "• Public server නම් deploy URL + token",
+                        "• Public (Colab/tunnel): https://xxx.trycloudflare.com\n" +
+                        "💡 සැබෑ phone එකක 10.0.2.2 වැඩ කරන්නේ නෑ — public URL එකක් ඕන!",
                     fontSize = 13.sp, color = TextDim, lineHeight = 19.sp
+                )
+                Text(
+                    "🚀 Easiest: Colab (free, minutes!)",
+                    color = Lavender, fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 8.dp).clickable {
+                        uriHandler2.openUri("https://colab.research.google.com/github/Rusindu12/Rs-et/blob/main/notebooks/RS_AI_Colab.ipynb")
+                    }
                 )
                 OutlinedTextField(
                     value = url,
@@ -482,6 +493,27 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                         unfocusedTextColor = TextMain
                     )
                 )
+                Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        vm.setServerUrl(url)
+                        vm.setApiToken(token)
+                        testResult = null
+                        vm.testConnection { ok, detail -> testResult = detail }
+                    }) {
+                        Text("🔗 Test connection", color = Lavender, fontWeight = FontWeight.Bold)
+                    }
+                    if (vm.healthCheckRunning.value) {
+                        Text("⏳", fontSize = 16.sp, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+                testResult?.let {
+                    Text(
+                        it,
+                        color = if (it.startsWith("✅")) Online else Color(0xFFF87171),
+                        fontSize = 12.sp, lineHeight = 16.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },

@@ -11,6 +11,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
@@ -49,12 +50,21 @@ data class ChatResponse(
     val sources: List<SourceItem>? = null
 )
 
+data class HealthResponse(
+    val status: String = "",
+    val active: String = "",
+    val modes: List<String>? = null,
+)
+
 interface RsAiApi {
     @POST("chat")
     suspend fun chat(
         @Body body: ChatRequest,
         @Header("Authorization") authorization: String? = null
     ): ChatResponse
+
+    @GET("health")
+    suspend fun health(): HealthResponse
 }
 
 object ApiClient {
@@ -82,6 +92,15 @@ object ApiClient {
         }
         return cachedApi!!
     }
+
+    /** Quick server reachability check (used by Settings "Test connection"). */
+    suspend fun healthCheck(base: String): Result<HealthResponse> =
+        try {
+            val h = api(base).health()
+            Result.success(h)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
 
     suspend fun chat(
         base: String,
