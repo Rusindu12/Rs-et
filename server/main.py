@@ -1,13 +1,18 @@
 """
-RS AI — FastAPI inference server for RS-GPT models.
+RS AI — FastAPI inference server.
+
+Replies come from a provider chain (see providers.py):
+  1. an external AI service if configured (Groq/OpenAI/Gemini/custom)
+  2. the local RS-GPT model as fallback — always available
 
 Run:
     pip install -r requirements.txt
-    python server/main.py            # or: uvicorn server.main:app --host 0.0.0.0 --port 8000
+    python server/main.py
+    RS_PROVIDER=groq RS_API_KEY=gsk_... python server/main.py
 
 Endpoints:
     GET  /                      -> web chat UI
-    GET  /health                -> model info
+    GET  /health                -> model + provider info
     POST /chat                  -> {"message": ..., "max_tokens": ..., "temperature": ...}
     POST /v1/chat/completions   -> OpenAI-compatible endpoint
 """
@@ -30,16 +35,21 @@ sys.path.insert(0, str(ROOT))
 
 from model.gpt import GPT, GPTConfig  # noqa: E402
 
+try:  # run as package (uvicorn server.main:app)
+    from .providers import build_chain
+except ImportError:  # run as script (python server/main.py)
+    from providers import build_chain
+
 CKPT = os.environ.get("RS_CKPT", str(ROOT / "model" / "runs" / "demo" / "ckpt.pt"))
 TOKENIZER = os.environ.get("RS_TOKENIZER", None)
 MAX_TOKENS_CAP = 512
 
 # --------------------------------------------------------------------------- #
-# Load model
+# Load local RS-GPT model
 # --------------------------------------------------------------------------- #
 
 print(f"[server] loading checkpoint: {CKPT}")
-ckpt = torch.load(CKPT, map_location="cpu")
+ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
 cfg = GPTConfig(**ckpt["config"])
 model = GPT(cfg)
 model.load_state_dict(ckpt["model"])
@@ -50,17 +60,16 @@ sp_path = TOKENIZER or ckpt.get("tokenizer")
 sp = spm.SentencePieceProcessor(model_file=sp_path)
 EOS_ID = sp.piece_to_id("<|end|>")
 N_PARAMS = model.num_params()
-print(f"[server] ready — {N_PARAMS:,} params | vocab {cfg.vocab_size} | ctx {cfg.block_size}")
+print(f"[server] local model ready — {N_PARAMS:,} params | vocab {cfg.vocab_size} | ctx {cfg.block_size}")
 
 
-def chat_reply(message: str, max_tokens: int = 200, temperature: float = 0.8,
-               top_p: float = 0.9, top_k: int = 50) -> str:
+def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8) -> str:
     prompt = f"<|user|>\n{message.strip()}\n<|assistant|>\n"
     ids = sp.encode(prompt)
     idx = torch.tensor(ids, dtype=torch.long)[None, :]
     with torch.no_grad():
         out = model.generate(idx, max_new_tokens=min(max_tokens, MAX_TOKENS_CAP),
-                             temperature=temperature, top_k=top_k, top_p=top_p,
+                             temperature=temperature, top_k=50, top_p=0.9,
                              eos_id=EOS_ID)
     text = sp.decode(out[0][len(ids):].tolist())
     for stop in ("<|end|>", "<|user|>"):
@@ -69,31 +78,57 @@ def chat_reply(message: str, max_tokens: int = 200, temperature: float = 0.8,
 
 
 # --------------------------------------------------------------------------- #
+# Provider chain (external AI first if configured, local as fallback)
+# --------------------------------------------------------------------------- #
+
+CHAIN = build_chain(local_reply)
+
+
+def smart_reply(message: str, max_tokens: int, temperature: float):
+    """Try providers in order; return (reply, provider_name)."""
+    last_err = None
+    for p in CHAIN:
+        try:
+            return p.chat(message, max_tokens=max_tokens, temperature=temperature), p.name
+        except Exception as e:  # noqa: BLE001 — failover by design
+            last_err = e
+            print(f"[providers] {p.name} failed: {e!r} -> trying next")
+    return f"⚠️ සියලුම providers අසාර්ථකයි: {last_err}", "none"
+
+
+# --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
 
-app = FastAPI(title="RS AI", version="1.0.0")
+app = FastAPI(title="RS AI", version="1.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 class ChatRequest(BaseModel):
     message: str
-    max_tokens: int = 200
+    max_tokens: int = 400
     temperature: float = 0.8
     top_p: float = 0.9
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": "RS-GPT", "params": N_PARAMS,
-            "vocab": cfg.vocab_size, "context": cfg.block_size}
+    return {
+        "status": "ok",
+        "local_model": "RS-GPT",
+        "params": N_PARAMS,
+        "vocab": cfg.vocab_size,
+        "context": cfg.block_size,
+        "providers": [p.name for p in CHAIN],
+        "active": CHAIN[0].name,
+    }
 
 
 @app.post("/chat")
 def chat(req: ChatRequest):
     t0 = time.time()
-    reply = chat_reply(req.message, req.max_tokens, req.temperature, req.top_p)
-    return {"reply": reply, "latency_ms": int((time.time() - t0) * 1000)}
+    reply, provider = smart_reply(req.message, req.max_tokens, req.temperature)
+    return {"reply": reply, "provider": provider, "latency_ms": int((time.time() - t0) * 1000)}
 
 
 class OAIMessage(BaseModel):
@@ -104,7 +139,7 @@ class OAIMessage(BaseModel):
 class OAIRequest(BaseModel):
     model: str = "rs-gpt"
     messages: list[OAIMessage]
-    max_tokens: int = 200
+    max_tokens: int = 400
     temperature: float = 0.8
 
 
@@ -112,12 +147,13 @@ class OAIRequest(BaseModel):
 def openai_chat(req: OAIRequest):
     user_msgs = [m.content for m in req.messages if m.role == "user"]
     message = user_msgs[-1] if user_msgs else ""
-    reply = chat_reply(message, req.max_tokens, req.temperature)
+    reply, provider = smart_reply(message, req.max_tokens, req.temperature)
     return {
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": req.model,
+        "provider": provider,
         "choices": [{
             "index": 0,
             "message": {"role": "assistant", "content": reply},
@@ -188,7 +224,7 @@ CHAT_HTML = """<!DOCTYPE html>
   <div class="logo">🤖</div>
   <div>
     <h1>RS AI</h1>
-    <div class="sub"><span class="dot"></span>සබැඳි · Sinhala + English · 1B LLM</div>
+    <div class="sub"><span class="dot" id="dot"></span><span id="subtxt">සබැඳිවෙමින්…</span></div>
   </div>
 </header>
 <div id="chat">
@@ -209,6 +245,16 @@ const chat = document.getElementById('chat');
 const inp = document.getElementById('inp');
 const btn = document.getElementById('send');
 inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+fetch('/health').then(r => r.json()).then(h => {
+  const el = document.getElementById('subtxt');
+  if (h.active && h.active !== 'rs-gpt-local') {
+    el.textContent = '⚡ smart mode · ' + h.active + ' · Sinhala + English';
+  } else {
+    el.textContent = 'සබැඳි · Sinhala + English · RS-GPT local';
+  }
+}).catch(() => { document.getElementById('subtxt').textContent = 'සබැඳි'; });
+
 function add(text, cls) {
   const d = document.createElement('div');
   d.className = 'msg ' + cls;
@@ -254,3 +300,8 @@ async function send() {
 @app.get("/", response_class=HTMLResponse)
 def home():
     return CHAT_HTML
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

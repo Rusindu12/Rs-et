@@ -1,3 +1,9 @@
 fastapi
 uvicorn[standard]
 pydantic
+requests
+
+# local RS-GPT model runtime — also see model/requirements.txt
+torch
+sentencepiece
+numpy

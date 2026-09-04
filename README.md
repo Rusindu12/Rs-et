@@ -21,7 +21,9 @@ Rs-et/
 │   └── README.md           #   📖 සිංහල 1B training guide (GPU steps)
 │
 ├── server/
-│   └── main.py             # FastAPI server: /chat + /v1/chat/completions + web UI
+│   ├── main.py             # FastAPI: /chat + /v1/chat/completions + web UI
+│   ├── providers.py        # 🔀 smart routing: Groq/OpenAI/Gemini/custom + local fallback
+│   └── README.md           #   📖 API key setup guide (නොමිලේ keys)
 │
 └── android-app/            # RS AI Chat — Kotlin + Jetpack Compose app
     ├── app/src/main/java/com/ruset/ai/
@@ -42,6 +44,10 @@ python train.py --config rs-gpt-demo --data data/sample_corpus.txt \
 
 # 2. Server එක run කරන්න → http://localhost:8000 (web chat UI එකත් එන්නේ මෙතනින්)
 cd .. && python server/main.py
+
+# 2b. (optional) වෙනත් AI වලින් උත්තර අරන් RS AI විදියට දෙන්න — smart mode ⚡
+#     Groq free key එකක්: https://console.groq.com ඉඳන්
+RS_PROVIDER=groq RS_API_KEY=gsk_... python server/main.py
 
 # 3. Android app එක → android-app/BUILD_GUIDE.md බලන්න
 ```
