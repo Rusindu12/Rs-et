@@ -169,6 +169,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun ModeRow(vm: ChatViewModel) {
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
