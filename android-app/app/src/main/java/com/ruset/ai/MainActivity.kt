@@ -139,6 +139,9 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { vm.toggleSpeak() }) {
+                            Text(if (vm.speakOn) "🔊" else "🔇", fontSize = 20.sp)
+                        }
                         IconButton(onClick = { vm.clearChat() }) {
                             Text("🗑️", fontSize = 20.sp)
                         }

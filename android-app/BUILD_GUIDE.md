@@ -71,5 +71,6 @@ PC එකේ IP එක සොයා ගන්න: Windows → `ipconfig`, Linux/
 - **🎙️ Voice input**: සිංහල speech recognizer (RECORD_AUDIO permission අහයි)
 - **Real-time streaming** — typewriter effect, long answers ලෝද්න fast ⚡, ⏹ Stop button
 - **💾 Chat persistence** — app close/rotate වුණත් chat මතක තියෙනවා (📋 long-press copy)
+- **🔊 Voice replies (TTS)** — top bar toggle; Sinhala/English auto-detect
 - Research mode answers w/ 📚 clickable sources; image mode generated images bubbles wල
 - Server side කිසිම key එකක් නැත්නම් local RS-GPT mode එකෙන් reply — app එක dead වෙන්නේ නෑ

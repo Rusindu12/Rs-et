@@ -13,6 +13,11 @@ Server එකේ built-in:
 
 ## 1️⃣ Deploy කරන තැන් (free tiers)
 
+> 📓 **One-click:** [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Rusindu12/Rs-et/blob/main/notebooks/RS_AI_Colab.ipynb)
+> `notebooks/RS_AI_Colab.ipynb` — deps → clone → (optional Groq smart key) → server + Cloudflare public URL.
+>
+> 🔧 **Live debug tip:** deploy වෙලා ඉන්න ඕනම server එකක් — `https://your-host/diagnose` (per-provider status, latency, keys masked, GPU/device/torch/python).
+
 ### 🥇 Hugging Face Spaces (recommended — free, always-on)
 
 1. [huggingface.co](https://huggingface.co) → account → **New Space** → SDK: **Docker**

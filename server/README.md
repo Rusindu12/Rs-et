@@ -116,6 +116,8 @@ Web UI එකේ/auto; Android app එකේ/auto. Streaming වලත් (`stre
 - `GET  /v1/models` — OpenAI model list (ChatBox/Open WebUI connect)
 - `GET  /ask?q=...` — easy GET (iOS Shortcuts / Tasker / browser)
 - `GET  /widget-demo` — embeddable widget demo
+- `GET  /diagnose` — 🔧 live self-test (per-provider status, key masks, think/vision
+  models, device/GPU, python/torch) — deploy එක debug කරනකොට first place to look
 - `GET  /static/widget.js` — any website එකට chat bubble (script tag 1)
 
 **Streaming:** `/chat` or `/v1/chat/completions` වල `"stream": true` → SSE

@@ -2,6 +2,7 @@
 
 [![Android APK](https://github.com/Rusindu12/Rs-et/actions/workflows/android.yml/badge.svg)](https://github.com/Rusindu12/Rs-et/actions/workflows/android.yml)
 [![Python CI](https://github.com/Rusindu12/Rs-et/actions/workflows/python-ci.yml/badge.svg)](https://github.com/Rusindu12/Rs-et/actions/workflows/python-ci.yml)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Rusindu12/Rs-et/blob/main/notebooks/RS_AI_Colab.ipynb)
 
 සිංහල සහ ඉංග්‍රීසි කතා කරන **තමන්ගේම AI model එකක්** (3.6M → **~3.95B "4B"** configs) —
 training pipeline එක, inference server එක, සහ Android chat app එක එකතුව.

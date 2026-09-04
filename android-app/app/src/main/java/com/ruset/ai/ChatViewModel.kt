@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.speech.tts.TextToSpeech
 import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -16,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 
 data class ChatMessage(
     val text: String,
@@ -36,9 +38,33 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("rsai_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
     private var activeCall: okhttp3.Call? = null
+    private var tts: TextToSpeech? = null
+
+    var speakOn by mutableStateOf(false)
+        private set
+
+    fun toggleSpeak() {
+        speakOn = !speakOn
+        if (speakOn && tts == null) {
+            tts = TextToSpeech(getApplication()) { status ->
+                if (status != TextToSpeech.SUCCESS) tts = null
+            }
+        } else if (!speakOn) {
+            tts?.stop()
+        }
+    }
+
+    private fun speakOut(text: String) {
+        if (!speakOn) return
+        val t = tts ?: return
+        val isSinhala = text.any { it.code in 0x0D80..0x0DFF }
+        t.language = if (isSinhala) Locale("si", "LK") else Locale.US
+        t.speak(text.take(800), TextToSpeech.QUEUE_FLUSH, null, "rsai_msg")
+    }
 
     fun stopGeneration() {
         activeCall?.cancel()
+        tts?.stop()
     }
 
     private fun persistChat() {
@@ -74,6 +100,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun clearChat() {
         attachments.clear()
         messages.clear()
+        tts?.stop()
         persistChat()
         messages.add(
             ChatMessage("ආයුබෝවන්! 👋 අලුතෙන් පටන් ගමු — මම RS AI 🤖", false)
@@ -198,6 +225,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     messages[botIdx] = ChatMessage(r.reply, false, r.image_url, r.sources)
                 }
                 persistChat()
+                speakOut(r.reply)
             } catch (e: Exception) {
                 val partial = if (botIdx < messages.size) messages[botIdx].text else ""
                 val text = if (partial.isNotBlank()) {

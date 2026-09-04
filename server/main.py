@@ -426,6 +426,10 @@ def health():
         "providers": [p.name for p in CHAIN],
         "active": CHAIN[0].name,
         "modes": MODES, "device": DEVICE, "rate_limit_per_min": RATE_LIMIT,
+        "capabilities": {"vision": any(p.family != "local" for p in CHAIN),
+                         "think": any(p.family != "local" for p in CHAIN),
+                         "image": True, "research": any(p.family != "local" for p in CHAIN),
+                         "streaming": True, "memory": True},
     }
 
 
@@ -530,6 +534,74 @@ def ask_get(q: str, mode: str = "chat", max_tokens: int = 300,
     result = smart_reply(q, mode, [], min(max_tokens, 1000), 0.7)
     result["latency_ms"] = int((time.time() - t0) * 1000)
     return result
+
+
+# --------------------------------------------------------------------------- #
+# /diagnose — server self-test for users debugging their deployment
+# --------------------------------------------------------------------------- #
+
+@app.get("/diagnose")
+def diagnose(token: str | None = None,
+             authorization: str | None = Header(default=None)):
+    """Live self-test: each provider tried with a tiny prompt, capabilities list.
+
+    Protected by RS_API_TOKEN (header or ?token=) when one is configured."""
+    server_tok = os.environ.get("RS_API_TOKEN")
+    if server_tok and authorization != f"Bearer {server_tok}" and token != server_tok:
+        raise HTTPException(status_code=401, detail="token required")
+
+    providers_report = []
+    for p in CHAIN:
+        entry = {"name": p.name, "family": p.family}
+        if p.family == "local":
+            t0 = time.time()
+            try:
+                _ = local_reply("hi", max_tokens=4, temperature=0.5)
+                entry["status"] = "ok"
+                entry["latency_ms"] = int((time.time() - t0) * 1000)
+            except Exception as e:  # noqa: BLE001
+                entry["status"] = "error"
+                entry["error"] = repr(e)
+        else:
+            if hasattr(p, "api_key"):
+                key = getattr(p, "api_key")
+                entry["key"] = "…" + key[-4:] if key else "missing"
+            entry["think_model"] = think_model_for(p)
+            entry["vision_model"] = vision_model_for(p)
+            t0 = time.time()
+            old_to = getattr(p, "timeout", 90)
+            try:
+                p.timeout = 20
+                reply = p.chat("Reply with exactly: pong", max_tokens=8, temperature=0)
+                entry["status"] = "ok"
+                entry["latency_ms"] = int((time.time() - t0) * 1000)
+                entry["sample"] = reply[:60]
+            except Exception as e:  # noqa: BLE001
+                entry["status"] = "unreachable"
+                entry["error"] = repr(e)[:200]
+            finally:
+                p.timeout = old_to
+        providers_report.append(entry)
+
+    return {
+        "version": "1.3.x",
+        "model": {"params": N_PARAMS, "vocab": cfg.vocab_size, "ctx": cfg.block_size},
+        "device": DEVICE,
+        "gpu_available": torch.cuda.is_available(),
+        "tokenizer": sp_path,
+        "checkpoint": CKPT,
+        "providers": providers_report,
+        "active": CHAIN[0].name if CHAIN else "none",
+        "image_mode": {
+            "provider": os.environ.get("RS_IMAGE_MODEL", "pollinations-free (key-less)"),
+            "ok": True,
+        },
+        "research_mode": "needs external provider + internet",
+        "modes": MODES,
+        "rate_limit_per_min": RATE_LIMIT,
+        "python": sys.version.split()[0],
+        "torch": torch.__version__,
+    }
 
 
 WIDGET_DEMO_HTML = r"""<!DOCTYPE html>
