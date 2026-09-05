@@ -30,3 +30,9 @@ android-app/local.properties
 # Secrets — API keys (use server/.env.example as the template)
 .env
 server/.env
+
+# Teach/runtime data (per-deployment, not source)
+model/data/rs_memory.json
+model/data/custom_corpus.txt
+model/runs/demo/ckpt.pt.bak
+model/runs/demo/ckpt_ft.pt

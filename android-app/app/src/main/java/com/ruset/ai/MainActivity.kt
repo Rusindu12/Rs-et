@@ -116,6 +116,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ChatScreen(vm: ChatViewModel = viewModel()) {
     var showSettings by remember { mutableStateOf(false) }
+    var showChats by remember { mutableStateOf(false) }
+    var showTeach by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(vm.messages.size, vm.isTyping) {
@@ -139,6 +141,12 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { showChats = true }) {
+                            Text("📂", fontSize = 20.sp)
+                        }
+                        IconButton(onClick = { showTeach = true }) {
+                            Text("🧠", fontSize = 20.sp)
+                        }
                         IconButton(onClick = { vm.toggleSpeak() }) {
                             Text(if (vm.speakOn) "🔊" else "🔇", fontSize = 20.sp)
                         }
@@ -173,6 +181,12 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 
     if (showSettings) {
         SettingsDialog(vm) { showSettings = false }
+    }
+    if (showChats) {
+        ChatsDialog(vm) { showChats = false }
+    }
+    if (showTeach) {
+        TeachDialog(vm) { showTeach = false }
     }
 }
 
@@ -543,3 +557,104 @@ fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
         }
     )
 }
+
+// ---------------- 💬 Chats dialog ----------------
+@Composable
+fun ChatsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BubbleBot,
+        title = { Text("💬 Chats", color = TextMain) },
+        text = {
+            Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    if (vm.sessionList.isEmpty()) {
+                        Text("chats නෑ — ＋ New chat", color = TextDim, fontSize = 13.sp)
+                    }
+                    LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                        items(vm.sessionList) { s ->
+                            Surface(
+                                color = if (s.id == vm.activeSessionId) Purple.copy(alpha = 0.25f) else BubbleBot,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clickable { vm.switchChat(s.id); onDismiss() }
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        s.title.take(26),
+                                        color = TextMain, fontSize = 14.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        " ✕", color = Color(0xFFF87171), fontSize = 15.sp,
+                                        modifier = Modifier.clickable { vm.deleteSession(s.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { vm.newChat(); onDismiss() }) {
+                Text("＋ New chat", color = Lavender, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close", color = TextDim) } }
+    )
+}
+
+// ---------------- 🧠 Teach dialog ----------------
+@Composable
+fun TeachDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
+    var teachText by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BubbleBot,
+        title = { Text("🧠 RS AIට උගන්වන්න", color = TextMain) },
+        text = {
+            Column {
+                Text(
+                    "Fact එකක් ලියන්න — උදා: මගේ නම Kasun, RS AI creator = RS team.",
+                    color = TextDim, fontSize = 12.sp, lineHeight = 17.sp
+                )
+                OutlinedTextField(
+                    value = teachText,
+                    onValueChange = { teachText = it },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Purple,
+                        focusedTextColor = TextMain,
+                        unfocusedTextColor = TextMain
+                    )
+                )
+                Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { vm.teachRemember(teachText) }) {
+                        Text("🧠 Instant", color = Lavender, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    TextButton(onClick = { vm.teachIntoCorpus(teachText) }) {
+                        Text("⬆ To train data", color = Lavender, fontSize = 13.sp)
+                    }
+                    TextButton(onClick = { vm.teachFineTune() }) {
+                        Text("🏋️ Fine-tune", color = Lavender, fontSize = 13.sp)
+                    }
+                }
+                if (vm.teachStatus.isNotBlank()) {
+                    Text(
+                        vm.teachStatus,
+                        color = if (vm.teachStatus.startsWith("⚠️")) Color(0xFFF87171) else Online,
+                        fontSize = 12.sp, lineHeight = 16.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = TextDim) } }
+    )
+}
+

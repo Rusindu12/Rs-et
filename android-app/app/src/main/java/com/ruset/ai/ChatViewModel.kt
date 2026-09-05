@@ -34,12 +34,25 @@ data class PendingAttachment(
     val dataB64: String
 )
 
+data class StoredSession(val title: String = "", val convo: List<ChatMessage> = emptyList())
+data class SessionMeta(val id: String, val title: String)
+
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("rsai_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
     private var activeCall: okhttp3.Call? = null
     private var tts: TextToSpeech? = null
+
+    // multi-chat sessions
+    private var sessionsMap: MutableMap<String, StoredSession> = mutableMapOf()
+    var activeSessionId by mutableStateOf("")
+        private set
+    val sessionList = mutableStateListOf<SessionMeta>()
+
+    // teach panel state
+    var teachStatus by mutableStateOf("")
+        private set
 
     var speakOn by mutableStateOf(false)
         private set
@@ -70,8 +83,105 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun persistChat() {
         try {
-            prefs.edit().putString("chat_history", gson.toJson(messages.takeLast(40))).apply()
+            if (activeSessionId.isBlank()) return
+            val firstUser = messages.firstOrNull { it.isUser }?.text ?: ""
+            val title = if (firstUser.isBlank()) "New chat" else firstUser.take(26)
+            sessionsMap[activeSessionId] = StoredSession(title, messages.toList().takeLast(40))
+            prefs.edit()
+                .putString("chat_sessions", gson.toJson(sessionsMap))
+                .putString("active_session", activeSessionId)
+                .apply()
+            refreshSessionList()
         } catch (e: Exception) { /* storage hiccup — non-fatal */ }
+    }
+
+    private fun refreshSessionList() {
+        sessionList.clear()
+        sessionsMap.keys.reversed().forEach { id ->
+            sessionList.add(SessionMeta(id, sessionsMap[id]?.title ?: "Chat"))
+        }
+    }
+
+    fun newChat() {
+        if (activeSessionId.isNotBlank()) persistChat()
+        activeSessionId = "c" + System.currentTimeMillis()
+        messages.clear()
+        messages.add(ChatMessage("ආයුබෝවන්! 👋 අලුත් chat එකක් — මම RS AI 🤖", false))
+        persistChat()
+    }
+
+    fun switchChat(id: String) {
+        if (id == activeSessionId) return
+        if (activeSessionId.isNotBlank()) persistChat()
+        activeSessionId = id
+        val convo = sessionsMap[id]?.convo ?: emptyList()
+        messages.clear()
+        if (convo.isEmpty()) {
+            messages.add(ChatMessage("ආයුබෝවන්! 👋", false))
+        } else {
+            messages.addAll(convo)
+        }
+        prefs.edit().putString("active_session", activeSessionId).apply()
+        refreshSessionList()
+    }
+
+    fun deleteSession(id: String) {
+        sessionsMap.remove(id)
+        prefs.edit().putString("chat_sessions", gson.toJson(sessionsMap)).apply()
+        if (id == activeSessionId) {
+            activeSessionId = sessionsMap.keys.lastOrNull() ?: ""
+            if (activeSessionId.isBlank()) newChat() else {
+                val convo = sessionsMap[activeSessionId]?.convo ?: emptyList()
+                messages.clear(); messages.addAll(convo)
+            }
+        }
+        refreshSessionList()
+    }
+
+    // ---------------- teach ----------------
+    fun teachRemember(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            teachStatus = "⏳…"
+            teachStatus = try {
+                val j = ApiClient.memoryAdd(serverUrl, apiToken, text)
+                "✅ Instant memory! ${j.items.size} facts — next chat වල auto use වෙනවා"
+            } catch (e: Exception) { "⚠️ " + (e.message ?: "error") }
+        }
+    }
+
+    fun teachIntoCorpus(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            teachStatus = "⏳…"
+            teachStatus = try {
+                val j = ApiClient.trainWrite(serverUrl, apiToken, text)
+                if (j.ok) "⬆ training data ✔ (${j.corpus_chars} chars) — Fine-tune 🏋️ button එකෙන් brain update"
+                else "⚠️ " + (j.error ?: "error")
+            } catch (e: Exception) { "⚠️ " + (e.message ?: "error") }
+        }
+    }
+
+    fun teachFineTune(steps: Int = 120) {
+        viewModelScope.launch {
+            teachStatus = try {
+                val j = ApiClient.trainRun(serverUrl, apiToken, steps)
+                if (!j.ok) { "⚠️ " + (j.error ?: "error") } else {
+                    "🏋️ fine-tune පටන්ගත්තා…"
+                    var done = false; var polls = 0
+                    var finalMsg = "✅ done"
+                    while (!done && polls < 120) {
+                        kotlinx.coroutines.delay(1500)
+                        polls++
+                        val st = ApiClient.trainStatus(serverUrl)
+                        if (st.running) teachStatus = "🏋️ ${st.step}/${st.total} steps · loss ${((st.loss ?: 0.0) * 1000).toInt() / 1000.0}"
+                        else if (st.error != null) { done = true; finalMsg = "⚠️ " + st.error }
+                        else { done = true; finalMsg = "🎉 fine-tune done! Brain hot-swapped — දැන්ම test!" }
+                    }
+                    finalMsg
+                }
+            } catch (e: Exception) { "⚠️ " + (e.message ?: "error") }
+        }
     }
 
     var serverUrl by mutableStateOf(prefs.getString("server_url", DEFAULT_URL) ?: DEFAULT_URL)
@@ -84,17 +194,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     init {
-        // 💾 restore previous chat (survives app restarts)
-        val saved = prefs.getString("chat_history", null)
-        if (!saved.isNullOrBlank()) {
+        // 💾 restore chat sessions (survives app restarts); legacy single history migrates
+        activeSessionId = prefs.getString("active_session", "") ?: ""
+        val savedMap = prefs.getString("chat_sessions", null)
+        if (!savedMap.isNullOrBlank()) {
             try {
-                val arr = gson.fromJson(saved, Array<ChatMessage>::class.java)
-                if (!arr.isNullOrEmpty()) {
-                    messages.clear()
-                    messages.addAll(arr.toList())
-                }
-            } catch (e: Exception) { /* corrupted save — ignore */ }
+                val type = object : com.google.gson.reflect.TypeToken<MutableMap<String, StoredSession>>() {}.type
+                val m: MutableMap<String, StoredSession> = gson.fromJson(savedMap, type)
+                sessionsMap.putAll(m)
+            } catch (e: Exception) { /* corrupted — start fresh */ }
         }
+        if (sessionsMap.isEmpty()) {
+            val saved = prefs.getString("chat_history", null)
+            if (!saved.isNullOrBlank()) {
+                try {
+                    val arr = gson.fromJson(saved, Array<ChatMessage>::class.java)
+                    if (!arr.isNullOrEmpty()) sessionsMap["c0"] = StoredSession("Chat", arr.toList())
+                } catch (e: Exception) { /* ignore */ }
+            }
+        }
+        if (activeSessionId.isBlank() || !sessionsMap.containsKey(activeSessionId)) {
+            activeSessionId = sessionsMap.keys.lastOrNull() ?: "c" + System.currentTimeMillis()
+        }
+        val convo = sessionsMap[activeSessionId]?.convo
+        if (!convo.isNullOrEmpty()) {
+            messages.clear()
+            messages.addAll(convo)
+        }
+        refreshSessionList()
     }
     val attachments = mutableStateListOf<PendingAttachment>()
 

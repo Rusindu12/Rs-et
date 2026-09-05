@@ -137,3 +137,18 @@ Web UI එකේ/auto; Android app එකේ/auto. Streaming වලත් (`stre
 
 **Streaming:** `/chat` or `/v1/chat/completions` වල `"stream": true` → SSE
 token-by-token (external providers ගෙන් pass-through, local model token loop).
+
+## 🧠 Teach / train (user-driven learning, 100% free)
+
+RS AIට දේවල් ඉගැන්විය හැකියි — web UI 🧠 button / Android app 🧠 button / API:
+
+- `GET/POST /memory` · `DELETE /memory/{idx}` — **instant memory facts** (`{"text":"..."}`).
+  Chat/🧠 think/🧠🧠 harder modes වල system prompt එකට auto inject (≤1200 chars).
+- `POST /train/write` — `{"text":"..."}` corpus add → `{"ok":true,"corpus_chars":N}`
+- `POST /train/run` — `{"steps":150,"lr":3e-4,"include_memory":true}` → **background fine-tune**
+  (daemon thread; weights **hot-swap** on finish — restart නැතුව fresh answers).
+  Checkpoint: `model/runs/demo/ckpt_ft.pt` (+ `ckpt.pt.bak` backup).
+- `GET /train/corpus` · `GET /train/status` — corpus size + live progress (`step/total/loss`).
+
+Auth: `RS_API_TOKEN` set නම් Bearer header / `?token=`, set නැත්නම් keyless ✅
+(FREE default — no payment, no accounts).

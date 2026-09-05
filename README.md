@@ -73,7 +73,7 @@ App/web UI mode chips — ChatGPT app එක වගේම:
 |---|---|---|---|---|
 | provider chain + 📷 vision | reasoning model (R1/o4-mini) | tokens ×2.5 | web search + citations ✓ | OpenAI images / free Pollinations |
 
-Plus: 📎 **files/photos/camera attachments** · 🎙️ **voice input (සිංහල)** · 🔊 **voice replies** — web UI ඉඳනේ.
+Plus: 📎 **files/photos/camera attachments** · 🎙️ **voice input (සිංහල)** · 🔊 **voice replies** · 💬 **multi-chat** (New Chat / switch / delete — web+app) · 🧠 **Teach AI** (instant memory facts ➜ prompt inject, training corpus ➜ on-demand **fine-tune + hot-swap**, all free) — web UI 🧠 button / Android 🧠 button.
 
 ### 💸 Open-source & 100% FREE smart brain
 

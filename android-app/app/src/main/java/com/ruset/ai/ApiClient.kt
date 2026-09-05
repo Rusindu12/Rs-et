@@ -11,6 +11,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
@@ -56,6 +57,18 @@ data class HealthResponse(
     val modes: List<String>? = null,
 )
 
+data class MemoryResp(val items: List<String> = emptyList())
+data class TextIn(val text: String)
+data class CorpusResp(val ok: Boolean = false, val error: String? = null,
+                      val corpus_chars: Int = 0)
+data class TrainRunIn(val steps: Int = 120)
+data class OkResp(val ok: Boolean = false, val error: String? = null,
+                  val steps: Int = 0)
+data class TrainStatus(
+    val running: Boolean = false, val step: Int = 0, val total: Int = 0,
+    val loss: Double? = null, val error: String? = null,
+)
+
 interface RsAiApi {
     @POST("chat")
     suspend fun chat(
@@ -65,6 +78,24 @@ interface RsAiApi {
 
     @GET("health")
     suspend fun health(): HealthResponse
+
+    @GET("memory")
+    suspend fun memoryList(@Header("Authorization") authorization: String? = null): MemoryResp
+
+    @POST("memory")
+    suspend fun memoryAdd(@Body body: TextIn,
+                          @Header("Authorization") authorization: String? = null): MemoryResp
+
+    @POST("train/write")
+    suspend fun trainWrite(@Body body: TextIn,
+                           @Header("Authorization") authorization: String? = null): CorpusResp
+
+    @POST("train/run")
+    suspend fun trainRun(@Body body: TrainRunIn,
+                         @Header("Authorization") authorization: String? = null): OkResp
+
+    @GET("train/status")
+    suspend fun trainStatus(@Header("Authorization") authorization: String? = null): TrainStatus
 }
 
 object ApiClient {
@@ -92,6 +123,24 @@ object ApiClient {
         }
         return cachedApi!!
     }
+
+    // ---------- teach endpoints ----------
+    private fun bearer(token: String) = if (token.isBlank()) null else "Bearer $token"
+
+    suspend fun memoryAdd(base: String, token: String, text: String): MemoryResp =
+        api(base).memoryAdd(TextIn(text), bearer(token))
+
+    suspend fun memoryList(base: String, token: String): MemoryResp =
+        api(base).memoryList(bearer(token))
+
+    suspend fun trainWrite(base: String, token: String, text: String): CorpusResp =
+        api(base).trainWrite(TextIn(text), bearer(token))
+
+    suspend fun trainRun(base: String, token: String, steps: Int): OkResp =
+        api(base).trainRun(TrainRunIn(steps), bearer(token))
+
+    suspend fun trainStatus(base: String): TrainStatus =
+        api(base).trainStatus()
 
     /** Quick server reachability check (used by Settings "Test connection"). */
     suspend fun healthCheck(base: String): Result<HealthResponse> =

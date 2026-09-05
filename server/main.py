@@ -38,10 +38,14 @@ from model.gpt import GPT, GPTConfig  # noqa: E402
 
 try:
     from . import research
-    from .providers import build_chain, generate_image, think_model_for, THINK_PROMPT, clean_history
+    from . import learn
+    from .providers import (build_chain, generate_image, think_model_for,
+                            THINK_PROMPT, clean_history, SYSTEM_PROMPT)
 except ImportError:
     import research
-    from providers import build_chain, generate_image, think_model_for, THINK_PROMPT, clean_history
+    import learn
+    from providers import (build_chain, generate_image, think_model_for,
+                           THINK_PROMPT, clean_history, SYSTEM_PROMPT)
 
 CKPT = os.environ.get("RS_CKPT", str(ROOT / "model" / "runs" / "demo" / "ckpt.pt"))
 TOKENIZER = os.environ.get("RS_TOKENIZER", None)
@@ -199,11 +203,25 @@ def prepare_attachments(atts):
 # Mode-aware reply engine
 # --------------------------------------------------------------------------- #
 
+def _kb_message(kb, full_msg, p):
+    """Prepend user-taught fact block for the local model (local ignores system)."""
+    return (kb + "\n" + full_msg) if (kb and p.family == "local") else full_msg
+
+
+def _kb_system(system, kb, p):
+    """Merge user-taught facts into the system prompt for external providers."""
+    if p.family == "local" or not kb:
+        return system
+    base = system or SYSTEM_PROMPT
+    return base + "\n\nUser-taught knowledge (use it when relevant):\n" + kb
+
+
 def _notes_block(notes):
     return ("\n".join(notes) + "\n\n") if notes else ""
 
 
 def smart_reply(message, mode, atts, max_tokens, temperature, history=None, system=None):
+    kb = learn.knowledge_block() if mode in ("chat", "think", "think_harder") else ""
     hist = clean_history(history)
     parts, images, notes = prepare_attachments(atts)
     full_msg = ("\n\n".join(parts + [message])) if parts else message
@@ -236,13 +254,15 @@ def smart_reply(message, mode, atts, max_tokens, temperature, history=None, syst
             try:
                 if p.family == "local":
                     note = ("💡 Thinking modes වලට smart mode ඕන "
-                            "(Groq free key → server/.env). Local උත්තරය:\n\n")
-                    return {"reply": prefix + note + p.chat(full_msg, max_tokens, temperature,
+                            "(free key → server/.env yaala auto). Local උත්තරය:\n\n")
+                    return {"reply": prefix + note + p.chat(_kb_message(kb, full_msg, p),
+                                                              max_tokens, temperature,
                                                               history=hist, system=system),
                             "provider": p.name, "mode": mode}
                 tm = think_model_for(p)
                 reply = p.chat(full_msg, want_tokens, want_temp,
-                               system=THINK_PROMPT, model_override=tm, history=hist)
+                               system=_kb_system(THINK_PROMPT, kb, p), model_override=tm,
+                               history=hist)
                 return {"reply": prefix + reply, "provider": f"{p.key}/{tm}", "mode": mode}
             except Exception as e:  # noqa: BLE001
                 print(f"[modes] think via {p.name} failed: {e!r}")
@@ -254,13 +274,14 @@ def smart_reply(message, mode, atts, max_tokens, temperature, history=None, syst
         try:
             if images and p.family == "local":
                 img_note = ("📷 Photos analyze කරන්න smart mode ඕන (vision model — "
-                            "Groq/Gemini free key). දැනට text විතරයි:\n\n")
-                return {"reply": prefix + img_note + p.chat(full_msg, max_tokens, temperature,
+                            "free key). දැනට text විතරයි:\n\n")
+                return {"reply": prefix + img_note + p.chat(_kb_message(kb, full_msg, p),
+                                                              max_tokens, temperature,
                                                               history=hist, system=system),
                         "provider": p.name, "mode": mode}
-            return {"reply": prefix + p.chat(full_msg, max_tokens, temperature,
+            return {"reply": prefix + p.chat(_kb_message(kb, full_msg, p), max_tokens, temperature,
                                              attachments=images or None,
-                                             history=hist, system=system),
+                                             history=hist, system=_kb_system(system, kb, p)),
                     "provider": p.name, "mode": mode}
         except Exception as e:  # noqa: BLE001
             print(f"[modes] {p.name} failed: {e!r} -> next")
@@ -269,6 +290,7 @@ def smart_reply(message, mode, atts, max_tokens, temperature, history=None, syst
 
 def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=None,
                        system=None):
+    kb = learn.knowledge_block() if mode in ("chat", "think", "think_harder") else ""
     """Yields (delta_text, provider_name, meta|None) triples for SSE streaming.
 
     chat/think stream token-by-token; research/image yield one final block
@@ -301,12 +323,13 @@ def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=Non
             mt = min(mt, 2000)
             temp = 0.5 if mode == "think_harder" else 0.6 if want_think else temperature
             if p.family == "local":
-                for delta in local_reply_stream(full_msg, min(mt, MAX_TOKENS_CAP), temp,
+                for delta in local_reply_stream(_kb_message(kb, full_msg, p),
+                                                min(mt, MAX_TOKENS_CAP), temp,
                                                 history=hist):
                     yield delta, p.name, None
             else:
                 tm = think_model_for(p) if want_think else None
-                sys_p = THINK_PROMPT if want_think else system
+                sys_p = THINK_PROMPT if want_think else _kb_system(system, kb, p)
                 pkey = f"{p.key}/{tm}" if want_think else p.name
                 for delta in p.chat_stream(full_msg, mt, temp, system=sys_p,
                                            attachments=images or None, model_override=tm,
@@ -503,6 +526,79 @@ def openai_chat(req: OAIRequest, authorization: str | None = Header(default=None
 # --------------------------------------------------------------------------- #
 # Universal access: /v1/models, GET /ask, embeddable widget
 # --------------------------------------------------------------------------- #
+
+# --------------------------------------------------------------------------- #
+# Teach RS AI: memory facts + corpus + fine-tune
+# --------------------------------------------------------------------------- #
+
+class MemoryIn(BaseModel):
+    text: str
+
+
+class TrainWriteIn(BaseModel):
+    text: str
+
+
+class TrainRunIn(BaseModel):
+    steps: int = 150
+    lr: float = 3e-4
+    include_memory: bool = True
+
+
+def _auth_any(authorization: str | None, token: str | None):
+    server_tok = os.environ.get("RS_API_TOKEN")
+    if server_tok and authorization != f"Bearer {server_tok}" and token != server_tok:
+        raise HTTPException(status_code=401, detail="token required")
+
+
+@app.get("/memory")
+def memory_get(token: str | None = None,
+               authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"items": learn.memory_list()}
+
+
+@app.post("/memory")
+def memory_add_route(body: MemoryIn, token: str | None = None,
+                     authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"items": learn.memory_add(body.text)}
+
+
+@app.delete("/memory/{idx}")
+def memory_del_route(idx: int, token: str | None = None,
+                     authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"items": learn.memory_delete(idx)}
+
+
+@app.get("/train/corpus")
+def train_corpus_route(token: str | None = None,
+                       authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"corpus_chars": learn.corpus_size(), "cap": learn.CORPUS_CAP}
+
+
+@app.post("/train/write")
+def train_write_route(body: TrainWriteIn, token: str | None = None,
+                      authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return learn.corpus_add(body.text)
+
+
+@app.get("/train/status")
+def train_status_route():
+    return learn.train_status()
+
+
+@app.post("/train/run")
+def train_run_route(body: TrainRunIn, token: str | None = None,
+                    authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return learn.run_training(model, sp, cfg, CKPT, steps=body.steps,
+                              lr=body.lr, device=DEVICE,
+                              include_memory=body.include_memory)
+
 
 @app.get("/v1/models")
 def list_models():
@@ -709,6 +805,24 @@ CHAT_HTML = r"""<!DOCTYPE html>
   .typing span { width:7px; height:7px; border-radius:50%; background:#94a3b8; animation: blink 1.2s infinite; }
   .typing span:nth-child(2){ animation-delay:.2s } .typing span:nth-child(3){ animation-delay:.4s }
   @keyframes blink { 0%,60%,100%{opacity:.3} 30%{opacity:1} }
+
+#drawer{position:fixed;top:0;left:0;height:100dvh;width:250px;background:#0f172a;border-right:1px solid rgba(148,163,184,.2);z-index:60;transform:translateX(-102%);transition:transform .22s;padding:14px;overflow-y:auto;}
+#drawer.open{transform:none;}
+.dr-title{display:flex;justify-content:space-between;align-items:center;color:#e2e8f0;font-weight:600;font-size:15px;padding-bottom:10px;border-bottom:1px solid rgba(148,163,184,.15);}
+#newchat{color:#a78bfa;font-size:13px;cursor:pointer;}
+.chatitem{padding:9px 10px;border-radius:10px;margin-top:8px;cursor:pointer;font-size:13px;color:#cbd5e1;display:flex;justify-content:space-between;gap:6px;background:#1e293b;}
+.chatitem.on{outline:1.5px solid #7c3aed;}
+.chatitem b{color:#f87171;font-weight:700;}
+#teachdlg{position:fixed;inset:0;background:rgba(2,6,23,.6);display:grid;place-items:center;z-index:70;padding:16px;}
+.teach-card{width:min(520px,96vw);max-height:88dvh;overflow-y:auto;background:#0f172a;border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:16px;}
+.teach-head{color:#e2e8f0;font-weight:700;display:flex;justify-content:space-between;font-size:15px;}
+#teachclose{cursor:pointer;color:#94a3b8;}
+#teachtext{width:100%;margin-top:10px;background:#1e293b;border:1px solid rgba(148,163,184,.25);border-radius:10px;color:#e2e8f0;padding:10px;font-size:14px;resize:vertical;box-sizing:border-box;}
+.teach-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.teach-row button{background:linear-gradient(135deg,#7c3aed,#4f46e5);border:none;color:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-size:13px;}
+#teachstatus{color:#94a3b8;font-size:12px;margin-top:10px;white-space:pre-wrap;}
+.memchip{display:flex;justify-content:space-between;gap:8px;background:#1e293b;border-radius:8px;padding:6px 8px;margin-top:6px;color:#cbd5e1;font-size:12px;}
+.memchip b{color:#f87171;cursor:pointer;flex:none;}
 </style>
 </head>
 <body>
@@ -719,10 +833,29 @@ CHAT_HTML = r"""<!DOCTYPE html>
     <div class="sub"><span class="dot"></span><span id="subtxt">සබැඳිවෙමින්…</span></div>
   </div>
   <div style="margin-left:auto;display:flex;gap:12px;font-size:19px;cursor:pointer;align-items:center;">
+    <span id="chats" title="Chats">📂</span>
+    <span id="teach" title="Teach RS AI">🧠</span>
     <span id="exp" title="Export chat (markdown)">⬇</span>
     <span id="clr" title="Clear chat">🗑️</span>
   </div>
 </header>
+<div id="drawer">
+  <div class="dr-title">💬 චැට් ලේඛන <span id="newchat">＋ New chat</span></div>
+  <div id="chatlist"></div>
+</div>
+<div id="teachdlg" hidden>
+  <div class="teach-card">
+    <div class="teach-head">🧠 RS AIට උගන්වන්න <span id="teachclose">✕</span></div>
+    <textarea id="teachtext" rows="4" placeholder="Fact එකක් ලියන්න — උදා: මගේ නම Kasun. RS AI ගේ creator RS team.""></textarea>
+    <div class="teach-row">
+      <button id="teachmem">🧠 Instant remember</button>
+      <button id="teachcorpus">⬆ Into training data</button>
+      <button id="teachrun">🏋️ Fine-tune now</button>
+    </div>
+    <div id="teachstatus"></div>
+    <div id="memlist"></div>
+  </div>
+</div>
 <div id="chat">
   <div class="msg bot">ආයුබෝවන්! 👋 මම <b>RS AI</b>. උඩ mode එකක් තෝරන්න — 💬 chat, 💡 thinking, 🔬 research, 🎨 image. Photos/files attach කරන්නත්, 🎙️ voice වලින් අහන්නත් පුළුවන්!</div>
 </div>
@@ -756,9 +889,173 @@ let atts = [];          // {name,kind,mime,data_b64}
 let speakOn = false;
 let convo = [];         // conversation memory [{role, content}]
 let aborter = null;     // AbortController while streaming
-function saveConvo() {
-  try { localStorage.setItem('rsai_conv', JSON.stringify(convo.slice(-40))); } catch (e) {}
+// 💬 multi-chat sessions (stored in localStorage)
+let chats = {};
+let activeChatId = null;
+
+function loadSessions() {
+  try { chats = JSON.parse(localStorage.getItem('rsai_chats') || '{}'); } catch (e) { chats = {}; }
+  const old = localStorage.getItem('rsai_conv');        // legacy single-convo migration
+  if (old && !Object.keys(chats).length) {
+    try {
+      const c = JSON.parse(old);
+      if (c.length) chats['c0'] = { title: 'Chat', convo: c };
+      localStorage.removeItem('rsai_conv');
+    } catch (e) {}
+  }
 }
+function saveSessions() { try { localStorage.setItem('rsai_chats', JSON.stringify(chats)); } catch (e) {} }
+function newChatId() { return 'c' + Date.now() + Math.floor(Math.random() * 999); }
+function ensureActive() {
+  if (!activeChatId || !chats[activeChatId]) {
+    activeChatId = newChatId();
+    chats[activeChatId] = { title: 'New chat', convo: [] };
+    saveSessions();
+  }
+  return chats[activeChatId];
+}
+function cur() { return chats[activeChatId]; }
+function saveConvo() {
+  if (!activeChatId) ensureActive();
+  const c = cur();
+  c.convo = convo.slice(-40);
+  if (c.title === 'New chat') {
+    const firstUser = c.convo.find(m => m.role === 'user');
+    if (firstUser) c.title = firstUser.content.slice(0, 26);
+  }
+  saveSessions();
+  renderChatList();
+}
+function drawer(open_) { document.getElementById('drawer').classList.toggle('open', open_); }
+function renderChatList() {
+  const el = document.getElementById('chatlist');
+  if (!el) return;
+  el.innerHTML = '';
+  Object.keys(chats).reverse().forEach(id => {
+    const c = chats[id];
+    const d = document.createElement('div');
+    d.className = 'chatitem' + (id === activeChatId ? ' on' : '');
+    d.textContent = (c.title || 'Chat').slice(0, 24);
+    const x = document.createElement('b');
+    x.textContent = '✕';
+    x.onclick = (ev) => {
+      ev.stopPropagation();
+      delete chats[id];
+      if (id === activeChatId) {
+        activeChatId = null;
+        ensureActive();
+        convo = cur().convo.slice();
+        chat.innerHTML = '';
+        if (convo.length) rebuildConvoDom(); else add('ආයුබෝවන්! 👋 අලුත් chat එකක් 🤖', 'bot');
+      }
+      saveSessions();
+      renderChatList();
+    };
+    d.appendChild(x);
+    d.onclick = () => {
+      saveConvo();
+      activeChatId = id;
+      convo = (cur().convo || []).slice();
+      rebuildConvoDom();
+      renderChatList();
+      drawer(false);
+    };
+    el.appendChild(d);
+  });
+}
+document.getElementById('chats').onclick = () => { renderChatList(); drawer(true); };
+document.getElementById('newchat').onclick = () => {
+  saveConvo();
+  activeChatId = null;
+  ensureActive();
+  convo = [];
+  chat.innerHTML = '';
+  add('ආයුබෝවන්! 👋 අලුත් chat එකක් — මම RS AI 🤖', 'bot');
+  renderChatList();
+  drawer(false);
+};
+
+// 🧠 teach panel — memory facts + training corpus + fine-tune
+const teachdlg = document.getElementById('teachdlg');
+document.getElementById('teach').onclick = () => { teachdlg.hidden = false; loadMemList(); };
+document.getElementById('teachclose').onclick = () => { teachdlg.hidden = true; };
+teachdlg.addEventListener('click', e => { if (e.target === teachdlg) teachdlg.hidden = true; });
+
+function teachStatusSet(t) { document.getElementById('teachstatus').textContent = t; }
+async function loadMemList() {
+  const el = document.getElementById('memlist');
+  try {
+    const r = await fetch('/memory', { headers: authHeaders() });
+    const j = await r.json();
+    el.innerHTML = '';
+    (j.items || []).forEach((m, i) => {
+      const d = document.createElement('div');
+      d.className = 'memchip';
+      const spanTxt = document.createElement('span');
+      spanTxt.textContent = m.slice(0, 70);
+      const x = document.createElement('b');
+      x.textContent = '✕';
+      x.onclick = async () => {
+        await fetch('/memory/' + i, { method: 'DELETE', headers: authHeaders() });
+        loadMemList();
+      };
+      d.appendChild(spanTxt); d.appendChild(x); el.appendChild(d);
+    });
+    if (!(j.items || []).length) {
+      el.innerHTML = '<div style="color:#64748b;font-size:12px;margin-top:8px;">facts නෑ — උඩ text field එකේ ලියලා "Instant remember" ☝️</div>';
+    }
+  } catch (e) { /* silent */ }
+}
+document.getElementById('teachmem').onclick = async () => {
+  const t = document.getElementById('teachtext').value.trim();
+  if (!t) return;
+  teachStatusSet('⏳…');
+  try {
+    const r = await fetch('/memory', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ text: t }) });
+    const j = await r.json();
+    teachStatusSet('✅ Instant memory! ✅ ' + (j.items || []).length + ' facts — ඊලඟ chat වලදී auto use වෙනවා.');
+    loadMemList();
+  } catch (e) { teachStatusSet('⚠️ ' + e.message); }
+};
+document.getElementById('teachcorpus').onclick = async () => {
+  const t = document.getElementById('teachtext').value.trim();
+  if (!t) return;
+  teachStatusSet('⏳…');
+  try {
+    const r = await fetch('/train/write', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ text: t }) });
+    const j = await r.json();
+    teachStatusSet(j.ok ? `⬆ training data ✔ (${j.corpus_chars} chars) — "Fine-tune now" click කරන්න brain update එකට`
+                        : '⚠️ ' + (j.error || 'error'));
+  } catch (e) { teachStatusSet('⚠️ ' + e.message); }
+};
+document.getElementById('teachrun').onclick = async () => {
+  teachStatusSet('⏳ starting fine-tune…');
+  try {
+    const r = await fetch('/train/run', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ steps: 150 }) });
+    const j = await r.json();
+    if (!j.ok) { teachStatusSet('⚠️ ' + (j.error || 'error')); return; }
+    teachStatusSet('🏋️ fine-tune පටන්ගත්තා…');
+    const timer = setInterval(async () => {
+      try {
+        const st = await (await fetch('/train/status')).json();
+        if (st.running) {
+          teachStatusSet(`🏋️ ${st.step}/${st.total} steps · loss ${Number(st.loss || 0).toFixed(3)}`);
+        } else {
+          clearInterval(timer);
+          teachStatusSet(st.error ? '⚠️ ' + st.error
+            : `🎉 fine-tune done! (${(st.last_run || {}).steps || 0} steps, brain hot-swapped — දැන්ම chat එකෙන් test කරන්න!)`);
+        }
+      } catch (e) { clearInterval(timer); }
+    }, 1200);
+  } catch (e) { teachStatusSet('⚠️ ' + e.message); }
+};
+
 
 inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
@@ -1011,14 +1308,14 @@ document.getElementById('regen').onclick = () => {
 };
 
 // 💾 restore previous chat from localStorage
-try {
-  const saved = JSON.parse(localStorage.getItem('rsai_conv') || '[]');
-  if (saved.length) {
-    convo = saved;
-    rebuildConvoDom();
-    chat.scrollTop = chat.scrollHeight;
-  }
-} catch (e) {}
+loadSessions();
+ensureActive();
+convo = cur().convo.slice();
+if (convo.length) {
+  rebuildConvoDom();
+  chat.scrollTop = chat.scrollHeight;
+}
+renderChatList();
 </script>
 </body>
 </html>
