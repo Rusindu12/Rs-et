@@ -813,10 +813,12 @@ CHAT_HTML = r"""<!DOCTYPE html>
 .chatitem{padding:9px 10px;border-radius:10px;margin-top:8px;cursor:pointer;font-size:13px;color:#cbd5e1;display:flex;justify-content:space-between;gap:6px;background:#1e293b;}
 .chatitem.on{outline:1.5px solid #7c3aed;}
 .chatitem b{color:#f87171;font-weight:700;}
-#teachdlg{position:fixed;inset:0;background:rgba(2,6,23,.6);display:grid;place-items:center;z-index:70;padding:16px;}
+#teachdlg{position:fixed;inset:0;background:rgba(2,6,23,.6);display:none;place-items:center;z-index:70;padding:16px;}
+#teachdlg:not([hidden]){display:grid;}
 .teach-card{width:min(520px,96vw);max-height:88dvh;overflow-y:auto;background:#0f172a;border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:16px;}
 .teach-head{color:#e2e8f0;font-weight:700;display:flex;justify-content:space-between;font-size:15px;}
-#teachclose{cursor:pointer;color:#94a3b8;}
+#teachclose{cursor:pointer;color:#94a3b8;font-size:22px;padding:4px 10px;line-height:1;}
+.teach-x{display:block;margin-top:14px;text-align:center;color:#a78bfa;font-weight:700;font-size:14px;cursor:pointer;padding:10px;border:1px solid rgba(167,139,250,.35);border-radius:10px;}
 #teachtext{width:100%;margin-top:10px;background:#1e293b;border:1px solid rgba(148,163,184,.25);border-radius:10px;color:#e2e8f0;padding:10px;font-size:14px;resize:vertical;box-sizing:border-box;}
 .teach-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
 .teach-row button{background:linear-gradient(135deg,#7c3aed,#4f46e5);border:none;color:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-size:13px;}
@@ -845,7 +847,7 @@ CHAT_HTML = r"""<!DOCTYPE html>
 </div>
 <div id="teachdlg" hidden>
   <div class="teach-card">
-    <div class="teach-head">🧠 RS AIට උගන්වන්න <span id="teachclose">✕</span></div>
+    <div class="teach-head">🧠 RS AIට උගන්වන්න <span id="teachclose" onclick="document.getElementById('teachdlg').hidden=true">✕</span></div>
     <textarea id="teachtext" rows="4" placeholder="Fact එකක් ලියන්න — උදා: මගේ නම Kasun. RS AI ගේ creator RS team.""></textarea>
     <div class="teach-row">
       <button id="teachmem">🧠 Instant remember</button>
@@ -854,6 +856,7 @@ CHAT_HTML = r"""<!DOCTYPE html>
     </div>
     <div id="teachstatus"></div>
     <div id="memlist"></div>
+    <span class="teach-x" onclick="document.getElementById('teachdlg').hidden=true">✕ Close</span>
   </div>
 </div>
 <div id="chat">
@@ -979,6 +982,7 @@ document.getElementById('newchat').onclick = () => {
 const teachdlg = document.getElementById('teachdlg');
 document.getElementById('teach').onclick = () => { teachdlg.hidden = false; loadMemList(); };
 document.getElementById('teachclose').onclick = () => { teachdlg.hidden = true; };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') teachdlg.hidden = true; });
 teachdlg.addEventListener('click', e => { if (e.target === teachdlg) teachdlg.hidden = true; });
 
 function teachStatusSet(t) { document.getElementById('teachstatus').textContent = t; }
