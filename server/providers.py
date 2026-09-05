@@ -425,12 +425,25 @@ class TextPollinationsProvider(Provider):
         msgs = [{"role": "system", "content": system or SYSTEM_PROMPT}]
         msgs.extend(clean_history(history))
         msgs.append({"role": "user", "content": message})
-        r = requests.post(
-            "https://text.pollinations.ai/",
-            json={"messages": msgs, "model": model_override or self.model,
-                  "jsonMode": False},
-            timeout=self.timeout,
-        )
+        model = model_override or self.model
+        try:
+            r = requests.post(
+                "https://text.pollinations.ai/",
+                json={"messages": msgs, "model": model, "jsonMode": False},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            text = r.text.strip()
+            if text:
+                return text
+            print("[pollinations] POST empty -> GET fallback")
+        except Exception as e:
+            print(f"[pollinations] POST failed: {e!r} -> GET fallback")
+        # GET single-prompt fallback (different route; works when POST is flaky)
+        import urllib.parse
+        flat = (system or SYSTEM_PROMPT)[:400] + "\n\nUser: " + message
+        url = "https://text.pollinations.ai/" + urllib.parse.quote(flat) + "?model=" + model
+        r = requests.get(url, timeout=self.timeout)
         r.raise_for_status()
         return r.text.strip()
 

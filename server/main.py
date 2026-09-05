@@ -115,6 +115,7 @@ def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8,
                              temperature=temperature, top_k=50, top_p=0.9,
                              eos_id=EOS_ID)
     text = sp.decode(out[0][len(ids):].tolist())
+    text = re.sub(r"<\|[^|]*\|>", "", text)          # drop leaked control tokens
     for stop in ("<|end|>", "<|user|>"):
         text = text.split(stop)[0]
     return text.strip() or "…"
@@ -138,6 +139,7 @@ def local_reply_stream(message: str, max_tokens: int = 200, temperature: float =
             next_id = torch.multinomial(probs, num_samples=1)
             idx = torch.cat((idx, next_id), dim=1)
             txt = sp.decode(idx[0][len(ids):].tolist())
+            txt = re.sub(r"<\|[^|]*\|>", "", txt)  # drop leaked control tokens
             for stop in ("<|end|>", "<|user|>"):
                 if stop in txt:
                     final = txt.split(stop)[0]
@@ -272,6 +274,13 @@ def smart_reply(message, mode, atts, max_tokens, temperature, history=None, syst
     img_note = ""
     for p in CHAIN:
         try:
+            if p.family == "local" and len(CHAIN) > 1:
+                note = ("🤖 Smart brain එක unavailable — demo local model එකෙන් "
+                        "(short simple answers විතරයි):\n\n")
+                return {"reply": prefix + note + p.chat(_kb_message(kb, full_msg, p),
+                                                          max_tokens, temperature,
+                                                          history=hist, system=system),
+                        "provider": p.name, "mode": mode}
             if images and p.family == "local":
                 img_note = ("📷 Photos analyze කරන්න smart mode ඕන (vision model — "
                             "free key). දැනට text විතරයි:\n\n")
@@ -319,6 +328,9 @@ def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=Non
                 yield note, p.name, None
             if want_think and p.family == "local":
                 yield "💡 smart mode ඕන thinking වලට. Local:\n\n", p.name, None
+            elif p.family == "local" and len(CHAIN) > 1:
+                yield ("🤖 Smart brain offline — local demo reply (short re):\n\n",
+                       p.name, None)
             mt = int(max_tokens * (2.5 if mode == "think_harder" else 1.5 if want_think else 1))
             mt = min(mt, 2000)
             temp = 0.5 if mode == "think_harder" else 0.6 if want_think else temperature
