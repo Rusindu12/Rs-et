@@ -1,0 +1,45 @@
+name: RS AI Smart Server (one-click, up to ~6h)
+
+on:
+  workflow_dispatch:    # Actions tab → "Run workflow"
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      RS_FREE_TEXT: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -q "torch==2.2.2" sentencepiece fastapi "uvicorn[standard]" requests "numpy<2"
+
+      - name: Start RS AI server + public tunnel
+        run: |
+          nohup python3 -u -m uvicorn server.main:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:8000/health && break || sleep 5; done
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cf
+          chmod +x cf
+          nohup ./cf tunnel --url http://localhost:8000 > tunnel.log 2>&1 &
+          URL=""
+          for i in $(seq 1 30); do
+            URL=$(grep -o "https://[a-z0-9.-]*\.trycloudflare\.com" tunnel.log | head -1)
+            [ -n "$URL" ] && break || sleep 2
+          done
+          echo "======================================================"
+          echo "🌍 RS AI SMART PUBLIC URL: $URL"
+          echo "➡️  Web UI open:        $URL"
+          echo "➡️  Android Settings ⚙️: $URL"
+          echo "➡️  Health:             $URL/health"
+          echo "======================================================"
+          sleep 20
+          curl -sf "$URL/health" && echo " ✅ reachable from internet" || echo " ⏳ still starting (wait +30s, then try the URL)"
+
+      - name: Keep alive (~5h 50min)
+        run: sleep 21000

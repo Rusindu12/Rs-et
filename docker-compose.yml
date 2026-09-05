@@ -1,0 +1,21 @@
+# RS AI — easy deploy with one command:
+#   docker compose up -d
+# .env එකකින් (same vars as server/.env.example): GROQ_API_KEY, RS_API_TOKEN...
+services:
+  rs-ai:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: server/.env
+        required: false      # create it from server/.env.example for smart mode
+    environment:
+      RS_FORCE_CPU: "1"      # GPU docker setup: use nvidia runtime & remove this
+    volumes:
+      - ./model/runs:/app/model/runs   # trained checkpoints from host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

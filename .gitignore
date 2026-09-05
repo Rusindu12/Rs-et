@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*
+
+# Model artifacts (generated during training — too large for git)
+*.pt
+*.pth
+*.npy
+model/tokenizer/*.model
+model/tokenizer/*.vocab
+model/runs/
+
+# ...EXCEPT the tiny demo artifacts (3.6M model, ~15 MB) — committed so the
+# server works out-of-the-box without retraining:
+!model/runs/
+!model/runs/demo/
+!model/runs/demo/ckpt.pt
+!model/tokenizer/rs_sp.model
+!model/tokenizer/rs_sp.vocab
+
+# Android / Gradle
+android-app/.gradle/
+android-app/local.properties
+**/build/
+*.apk
+*.aab
+
+# Secrets — API keys (use server/.env.example as the template)
+.env
+server/.env
+
+# Teach/runtime data (per-deployment, not source)
+model/data/rs_memory.json
+model/data/custom_corpus.txt
+model/runs/demo/ckpt.pt.bak
+model/runs/demo/ckpt_ft.pt

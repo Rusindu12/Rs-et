@@ -1,0 +1,81 @@
+name: Python CI
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "server/**"
+      - "model/**"
+      - "train/**"
+      - "eval/**"
+      - ".github/workflows/python-ci.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  checks:
+    name: Syntax + server smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Syntax-check all python files
+        run: python -m compileall -q server model train eval && echo "syntax OK"
+
+      - name: Smoke test server (with the bundled demo checkpoint)
+        run: |
+          pip install --quiet torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet fastapi "uvicorn[standard]" sentencepiece requests "numpy<2"
+          RS_FORCE_CPU=1 nohup python -m uvicorn server.main:app --host 127.0.0.1 --port 8123 >/tmp/rs.log 2>&1 &
+          ok=""
+          for i in $(seq 1 90); do
+            sleep 2
+            if curl -sf http://127.0.0.1:8123/health; then ok=1; break; fi
+          done
+          echo
+          if [ -z "$ok" ]; then echo "---- server log ----"; cat /tmp/rs.log; exit 1; fi
+          curl -sf -X POST http://127.0.0.1:8123/chat \
+            -H "Content-Type: application/json" \
+            -d '{"message": "hello", "history": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello!"}], "max_tokens": 20}'
+          echo
+          curl -sf "http://127.0.0.1:8123/ask?q=test"
+          echo
+          curl -sf http://127.0.0.1:8123/v1/models
+          echo
+          echo "== free key-less chain (pollinations) =="
+          curl -sf http://127.0.0.1:8123/health | grep -q "pollinations"             || { echo "expected free pollinations provider in health"; exit 1; }
+          echo "free chain present ✅"
+          echo "== think mode live through pollinations (informational, non-fatal) =="
+          curl -sS --max-time 180 -X POST http://127.0.0.1:8123/chat             -H "Content-Type: application/json"             -d '{"message": "Say exactly: pong", "mode": "think", "max_tokens": 30}'             | head -c 400             || echo "warn: live pollinations call unstable — fallback covers it"
+          echo
+          echo "smoke test OK"
+
+      - name: Report failure log as GitHub issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "### Python CI smoke test failed"
+            echo "Run: https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "server log:"
+            echo '```'
+            cat /tmp/rs.log 2>/dev/null || echo "(no /tmp/rs.log)"
+            echo '```'
+            echo "curl probe:"
+            echo '```'
+            curl -sv --max-time 5 http://127.0.0.1:8123/health 2>&1 | tail -20
+            echo '```'
+          } | gh issue create \
+                --title "❌ CI python smoke failed (${GITHUB_SHA:0:7})" \
+                --body-file - \
+                --repo "${REPO}" || true

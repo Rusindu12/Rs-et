@@ -1,0 +1,1348 @@
+"""
+RS AI — FastAPI inference server with SMART MODES.
+
+Modes (client selectable): chat | think | think_harder | research | image
+  💬 chat          -> provider chain (text + 📷 image attachments for vision models)
+  💡 think         -> reasoning model (DeepSeek-R1 / o4-mini / ...) via RS_MODEL_THINK
+  🧠 think_harder  -> same, more tokens + lower temperature
+  🔬 research      -> multi-step web research with sources (research.py)
+  🎨 image         -> image generation (OpenAI images API or free key-less service)
+
+Run:
+    pip install -r requirements.txt
+    python server/main.py
+"""
+
+import base64
+import io
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+import torch
+import sentencepiece as spm
+import torch.nn.functional as F
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from model.gpt import GPT, GPTConfig  # noqa: E402
+
+try:
+    from . import research
+    from . import learn
+    from .providers import (build_chain, generate_image, think_model_for,
+                            THINK_PROMPT, clean_history, SYSTEM_PROMPT)
+except ImportError:
+    import research
+    import learn
+    from providers import (build_chain, generate_image, think_model_for,
+                           THINK_PROMPT, clean_history, SYSTEM_PROMPT)
+
+CKPT = os.environ.get("RS_CKPT", str(ROOT / "model" / "runs" / "demo" / "ckpt.pt"))
+TOKENIZER = os.environ.get("RS_TOKENIZER", None)
+MAX_TOKENS_CAP = 512
+MODES = ["chat", "think", "think_harder", "research", "image"]
+
+
+def _load_dotenv():
+    """Minimal .env loader (no dependency): KEY=VALUE lines, '#' comments."""
+    candidates = (Path(__file__).resolve().parent / ".env", ROOT / ".env")
+    for cand in candidates:
+        if cand.exists():
+            for line in cand.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            print(f"[server] loaded env from {cand}")
+            return
+
+
+_load_dotenv()
+
+# --------------------------------------------------------------------------- #
+# Load local RS-GPT model
+# --------------------------------------------------------------------------- #
+
+DEVICE = "cuda" if torch.cuda.is_available() and os.environ.get("RS_FORCE_CPU") != "1" else "cpu"
+print(f"[server] loading checkpoint: {CKPT} (device: {DEVICE})")
+ckpt = torch.load(CKPT, map_location=DEVICE, weights_only=False)
+cfg = GPTConfig(**ckpt["config"])
+model = GPT(cfg)
+model.load_state_dict(ckpt["model"])
+model.to(DEVICE)
+model.eval()
+torch.set_num_threads(max(1, os.cpu_count() or 1))
+
+# tokenizer: env override -> checkpoint record -> repo-local fallback
+# (checkpoints may store an absolute path from the machine they trained on)
+_sp_cands = [TOKENIZER, ckpt.get("tokenizer"),
+             str(ROOT / "model" / "tokenizer" / "rs_sp.model")]
+sp_path = next((c for c in _sp_cands if c and Path(c).exists()), None)
+assert sp_path, f"tokenizer not found in {_sp_cands}"
+sp = spm.SentencePieceProcessor(model_file=sp_path)
+EOS_ID = sp.piece_to_id("<|end|>")
+N_PARAMS = model.num_params()
+print(f"[server] local model ready — {N_PARAMS:,} params | vocab {cfg.vocab_size} | ctx {cfg.block_size}")
+
+
+def _history_prompt(message: str, history) -> str:
+    """Multi-turn prompt — recent <|user|>/<|assistant|> turns stitched in."""
+    out = ""
+    for h in (history or [])[-8:]:
+        tag = "<|user|>" if h.get("role") == "user" else "<|assistant|>"
+        out += f"{tag}\n{str(h.get('content', '')).strip()[:600]}\n<|end|>\n"
+    return out + f"<|user|>\n{message.strip()}\n<|assistant|>\n"
+
+
+def local_reply(message: str, max_tokens: int = 200, temperature: float = 0.8,
+                history=None) -> str:
+    prompt = _history_prompt(message, history)
+    ids = sp.encode(prompt)
+    idx = torch.tensor(ids, dtype=torch.long)[None, :].to(DEVICE)
+    with torch.no_grad():
+        out = model.generate(idx, max_new_tokens=min(max_tokens, MAX_TOKENS_CAP),
+                             temperature=temperature, top_k=50, top_p=0.9,
+                             eos_id=EOS_ID)
+    text = sp.decode(out[0][len(ids):].tolist())
+    text = re.sub(r"<\|[^|]*\|>", "", text)          # drop leaked control tokens
+    for stop in ("<|end|>", "<|user|>"):
+        text = text.split(stop)[0]
+    return text.strip() or "…"
+
+
+def local_reply_stream(message: str, max_tokens: int = 200, temperature: float = 0.8,
+                       history=None):
+    """Token-by-token streaming from the local model (yields text deltas)."""
+    prompt = _history_prompt(message, history)
+    ids = sp.encode(prompt)
+    idx = torch.tensor(ids, dtype=torch.long)[None, :].to(DEVICE)
+    with torch.no_grad():
+        prev = ""
+        for _ in range(min(max_tokens, MAX_TOKENS_CAP)):
+            idx_cond = idx[:, -cfg.block_size:]
+            logits, _ = model(idx_cond)
+            logits = logits[:, -1, :] / max(temperature, 1e-5)
+            v, _ = torch.topk(logits, min(50, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = float("-inf")
+            probs = F.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, next_id), dim=1)
+            txt = sp.decode(idx[0][len(ids):].tolist())
+            txt = re.sub(r"<\|[^|]*\|>", "", txt)  # drop leaked control tokens
+            for stop in ("<|end|>", "<|user|>"):
+                if stop in txt:
+                    final = txt.split(stop)[0]
+                    if len(final) > len(prev):
+                        yield final[len(prev):]
+                    return
+            delta = txt[len(prev):]
+            if delta:
+                yield delta
+                prev = txt
+
+
+CHAIN = build_chain(local_reply)
+
+# --------------------------------------------------------------------------- #
+# Attachment handling
+# --------------------------------------------------------------------------- #
+
+TEXT_EXT = (".txt", ".md", ".json", ".csv", ".log", ".py", ".js", ".ts", ".html",
+            ".css", ".xml", ".yaml", ".yml", ".ini", ".toml", ".sh", ".java",
+            ".kt", ".c", ".cpp", ".h", ".go", ".rs", ".sql")
+
+
+def prepare_attachments(atts):
+    """Split into (merged_text_parts, images, notes). Caps: 3 files, 4 MB b64 each."""
+    parts, images, notes = [], [], []
+    for a in (atts or [])[:3]:
+        b64 = a.data_b64 or ""
+        if len(b64) > 4_200_000:
+            notes.append(f"⚠️ '{a.name}' ලොකු වැඩියි (max ~3MB)")
+            continue
+        if a.kind == "image":
+            images.append({"kind": "image", "mime": a.mime, "data_b64": b64})
+            continue
+        raw = b""
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            pass
+        txt = ""
+        if a.name.lower().endswith(".pdf"):
+            try:
+                from pypdf import PdfReader  # optional dep
+                reader = PdfReader(io.BytesIO(raw))
+                txt = "\n".join((p.extract_text() or "") for p in reader.pages[:8])
+            except Exception:
+                notes.append(f"⚠️ '{a.name}' PDF කියවන්න බැරි වුණා")
+        else:
+            try:
+                txt = raw.decode("utf-8", errors="replace")
+            except Exception:
+                txt = ""
+        if txt.strip():
+            parts.append(f"[📎 file: {a.name}]\n{txt[:6000]}")
+        else:
+            notes.append(f"⚠️ '{a.name}' text extract කරන්න බැරි වුණා")
+    if atts and len(atts) > 3:
+        notes.append("⚠️ files 3කට වඩා නොගත්තා")
+    return parts, images, notes
+
+
+# --------------------------------------------------------------------------- #
+# Mode-aware reply engine
+# --------------------------------------------------------------------------- #
+
+def _kb_message(kb, full_msg, p):
+    """Prepend user-taught fact block for the local model (local ignores system)."""
+    return (kb + "\n" + full_msg) if (kb and p.family == "local") else full_msg
+
+
+def _kb_system(system, kb, p):
+    """Merge user-taught facts into the system prompt for external providers."""
+    if p.family == "local" or not kb:
+        return system
+    base = system or SYSTEM_PROMPT
+    return base + "\n\nUser-taught knowledge (use it when relevant):\n" + kb
+
+
+def _notes_block(notes):
+    return ("\n".join(notes) + "\n\n") if notes else ""
+
+
+def smart_reply(message, mode, atts, max_tokens, temperature, history=None, system=None):
+    kb = learn.knowledge_block() if mode in ("chat", "think", "think_harder") else ""
+    hist = clean_history(history)
+    parts, images, notes = prepare_attachments(atts)
+    full_msg = ("\n\n".join(parts + [message])) if parts else message
+    prefix = _notes_block(notes)
+
+    # 🎨 IMAGE
+    if mode == "image":
+        prompt = message.strip() or "beautiful sri lankan landscape, digital art"
+        reply, url, prov = generate_image(prompt, CHAIN)
+        return {"reply": prefix + reply, "provider": prov, "image_url": url, "mode": mode}
+
+    # 🔬 DEEP RESEARCH
+    if mode == "research":
+        reply, sources, prov = research.run_research(CHAIN, full_msg)
+        if reply is None:
+            fb = local_reply(full_msg, min(max_tokens, 300), temperature, history=hist)
+            return {
+                "reply": prefix + "🔬 Web research එකට smart mode (Groq/Gemini key) + internet ඕන. Local model එකෙන්:\n\n" + fb,
+                "provider": "rs-gpt-local", "mode": mode,
+                "sources": sources or None,
+            }
+        return {"reply": prefix + reply, "provider": prov, "sources": sources, "mode": mode}
+
+    # 💡🧠 THINK / THINK HARDER
+    if mode in ("think", "think_harder"):
+        harder = mode == "think_harder"
+        want_tokens = min(int(max_tokens * (2.5 if harder else 1.5)), 2000)
+        want_temp = 0.5 if harder else 0.6
+        for p in CHAIN:
+            try:
+                if p.family == "local":
+                    note = ("💡 Thinking modes වලට smart mode ඕන "
+                            "(free key → server/.env yaala auto). Local උත්තරය:\n\n")
+                    return {"reply": prefix + note + p.chat(_kb_message(kb, full_msg, p),
+                                                              max_tokens, temperature,
+                                                              history=hist, system=system),
+                            "provider": p.name, "mode": mode}
+                tm = think_model_for(p)
+                reply = p.chat(full_msg, want_tokens, want_temp,
+                               system=_kb_system(THINK_PROMPT, kb, p), model_override=tm,
+                               history=hist)
+                return {"reply": prefix + reply, "provider": f"{p.key}/{tm}", "mode": mode}
+            except Exception as e:  # noqa: BLE001
+                print(f"[modes] think via {p.name} failed: {e!r}")
+        return {"reply": prefix + "⚠️ providers අසාර්ථකයි.", "provider": "none", "mode": mode}
+
+    # 💬 CHAT (normal) — attachments: images need a vision-capable external provider
+    img_note = ""
+    for p in CHAIN:
+        try:
+            if p.family == "local" and len(CHAIN) > 1:
+                note = ("🤖 Smart brain එක unavailable — demo local model එකෙන් "
+                        "(short simple answers විතරයි):\n\n")
+                return {"reply": prefix + note + p.chat(_kb_message(kb, full_msg, p),
+                                                          max_tokens, temperature,
+                                                          history=hist, system=system),
+                        "provider": p.name, "mode": mode}
+            if images and p.family == "local":
+                img_note = ("📷 Photos analyze කරන්න smart mode ඕන (vision model — "
+                            "free key). දැනට text විතරයි:\n\n")
+                return {"reply": prefix + img_note + p.chat(_kb_message(kb, full_msg, p),
+                                                              max_tokens, temperature,
+                                                              history=hist, system=system),
+                        "provider": p.name, "mode": mode}
+            return {"reply": prefix + p.chat(_kb_message(kb, full_msg, p), max_tokens, temperature,
+                                             attachments=images or None,
+                                             history=hist, system=_kb_system(system, kb, p)),
+                    "provider": p.name, "mode": mode}
+        except Exception as e:  # noqa: BLE001
+            print(f"[modes] {p.name} failed: {e!r} -> next")
+    return {"reply": prefix + "⚠️ සියලුම providers අසාර්ථකයි.", "provider": "none", "mode": mode}
+
+
+def smart_reply_stream(message, mode, atts, max_tokens, temperature, history=None,
+                       system=None):
+    kb = learn.knowledge_block() if mode in ("chat", "think", "think_harder") else ""
+    """Yields (delta_text, provider_name, meta|None) triples for SSE streaming.
+
+    chat/think stream token-by-token; research/image yield one final block
+    (meta carries image_url/sources so streaming clients can render them)."""
+    hist = clean_history(history)
+    parts, images, notes = prepare_attachments(atts)
+    full_msg = ("\n\n".join(parts + [message])) if parts else message
+    prefix = _notes_block(notes)
+    if prefix:
+        yield prefix, "images" if images else "files", None
+
+    if mode in ("research", "image"):
+        # non-streaming by nature — emit final result as one delta
+        result = smart_reply(message, mode, atts, max_tokens, temperature,
+                             history=hist, system=system)
+        text = result["reply"][len(prefix):] if result["reply"].startswith(prefix) else result["reply"]
+        meta = {k: result[k] for k in ("image_url", "sources") if result.get(k)}
+        yield text, result["provider"], (meta or None)
+        return
+
+    want_think = mode in ("think", "think_harder")
+    for p in CHAIN:
+        try:
+            if p.family == "local" and images:
+                note = ("📷 Photos analyze කරනා smart mode ඕන. දැනට text:\n\n")
+                yield note, p.name, None
+            if want_think and p.family == "local":
+                yield "💡 smart mode ඕන thinking වලට. Local:\n\n", p.name, None
+            elif p.family == "local" and len(CHAIN) > 1:
+                yield ("🤖 Smart brain offline — local demo reply (short re):\n\n",
+                       p.name, None)
+            mt = int(max_tokens * (2.5 if mode == "think_harder" else 1.5 if want_think else 1))
+            mt = min(mt, 2000)
+            temp = 0.5 if mode == "think_harder" else 0.6 if want_think else temperature
+            if p.family == "local":
+                for delta in local_reply_stream(_kb_message(kb, full_msg, p),
+                                                min(mt, MAX_TOKENS_CAP), temp,
+                                                history=hist):
+                    yield delta, p.name, None
+            else:
+                tm = think_model_for(p) if want_think else None
+                sys_p = THINK_PROMPT if want_think else _kb_system(system, kb, p)
+                pkey = f"{p.key}/{tm}" if want_think else p.name
+                for delta in p.chat_stream(full_msg, mt, temp, system=sys_p,
+                                           attachments=images or None, model_override=tm,
+                                           history=hist):
+                    yield delta, pkey, None
+            return
+        except Exception as e:  # noqa: BLE001
+            print(f"[stream] {p.name} failed: {e!r} -> next")
+    yield "⚠️ සියලුම providers අසාර්ථකයි.", "none", None
+
+
+def _openai_sse(stream_gen, model_id: str):
+    """OpenAI chat.completion.chunk SSE format."""
+    cid = f"chatcmpl-{int(time.time())}"
+    provider = "unknown"
+    first = True
+    for delta, prov, _meta in stream_gen:
+        provider = prov
+        role = {"role": "assistant"} if first else {}
+        first = False
+        chunk = {
+            "id": cid, "object": "chat.completion.chunk",
+            "created": int(time.time()), "model": model_id,
+            "provider": provider,
+            "choices": [{"index": 0, "delta": {**role, "content": delta},
+                         "finish_reason": None}],
+        }
+        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+    end = {
+        "id": cid, "object": "chat.completion.chunk",
+        "created": int(time.time()), "model": model_id, "provider": provider,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(end, ensure_ascii=False)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+def _rs_sse(stream_gen):
+    """Simple RS AI SSE format for /chat?stream=true: data: {"delta": ...} then {"done": ..., meta}."""
+    provider = "unknown"
+    meta = {}
+    for delta, prov, m in stream_gen:
+        provider = prov
+        if m:
+            meta.update(m)
+        yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+    done = {"done": True, "provider": provider}
+    done.update(meta)
+    yield f"data: {json.dumps(done, ensure_ascii=False)}\n\n"
+
+
+# --------------------------------------------------------------------------- #
+# API
+# --------------------------------------------------------------------------- #
+
+app = FastAPI(title="RS AI", version="1.3.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Per-IP rate limit for chat endpoints (RS_RATE_LIMIT_PER_MIN, 0 = off)
+RATE_LIMIT = int(os.environ.get("RS_RATE_LIMIT_PER_MIN", "0") or "0")
+_rate_hits: dict = {}
+
+
+@app.middleware("http")
+async def _rate_limit_mw(request, call_next):
+    if RATE_LIMIT > 0 and request.url.path.startswith(("/chat", "/v1/", "/ask")):
+        fwd = request.headers.get("x-forwarded-for") or getattr(request.client, "host", "?")
+        bucket = f"{fwd.split(',')[0].strip()}:{int(time.time() // 60)}"
+        if len(_rate_hits) > 20000:
+            _rate_hits.clear()
+        _rate_hits[bucket] = _rate_hits.get(bucket, 0) + 1
+        if _rate_hits[bucket] > RATE_LIMIT:
+            return JSONResponse({"detail": f"Rate limit exceeded ({RATE_LIMIT}/min)."},
+                                status_code=429)
+    return await call_next(request)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+
+
+def _require_token(authorization: str | None) -> None:
+    tok = os.environ.get("RS_API_TOKEN")
+    if tok and authorization != f"Bearer {tok}":
+        raise HTTPException(status_code=401, detail="invalid or missing API token (RS_API_TOKEN)")
+
+
+class Attachment(BaseModel):
+    name: str = "file"
+    kind: str = "file"          # "image" | "file"
+    mime: str = "text/plain"
+    data_b64: str = ""
+
+
+class HistoryMsg(BaseModel):
+    role: str                   # "user" | "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    mode: str = "chat"          # chat | think | think_harder | research | image
+    attachments: list[Attachment] = []
+    history: list[HistoryMsg] = []   # conversation memory (recent turns)
+    system: str | None = None        # custom persona (Redis apps/widget)
+    max_tokens: int = 400
+    temperature: float = 0.8
+    top_p: float = 0.9
+    stream: bool = False
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "local_model": "RS-GPT",
+        "params": N_PARAMS,
+        "vocab": cfg.vocab_size,
+        "context": cfg.block_size,
+        "providers": [p.name for p in CHAIN],
+        "active": CHAIN[0].name,
+        "modes": MODES, "device": DEVICE, "rate_limit_per_min": RATE_LIMIT,
+        "capabilities": {"vision": any(p.family != "local" for p in CHAIN),
+                         "think": any(p.family != "local" for p in CHAIN),
+                         "image": True, "research": any(p.family != "local" for p in CHAIN),
+                         "streaming": True, "memory": True},
+    }
+
+
+@app.post("/chat")
+def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
+    _require_token(authorization)
+    mode = (req.mode or "chat").lower()
+    if mode not in MODES:
+        mode = "chat"
+    if req.stream:
+        gen = smart_reply_stream(req.message, mode, req.attachments,
+                                 req.max_tokens, req.temperature,
+                                 history=[h.model_dump() for h in req.history], system=req.system)
+        return StreamingResponse(_rs_sse(gen), media_type="text/event-stream")
+    t0 = time.time()
+    result = smart_reply(req.message, mode, req.attachments, req.max_tokens, req.temperature,
+                         history=[h.model_dump() for h in req.history], system=req.system)
+    result["latency_ms"] = int((time.time() - t0) * 1000)
+    return result
+
+
+class OAIMessage(BaseModel):
+    role: str
+    content: str
+
+
+class OAIRequest(BaseModel):
+    model: str = "rs-gpt"
+    messages: list[OAIMessage]
+    max_tokens: int = 400
+    temperature: float = 0.8
+    stream: bool = False
+
+
+@app.post("/v1/chat/completions")
+def openai_chat(req: OAIRequest, authorization: str | None = Header(default=None)):
+    _require_token(authorization)
+    user_idxs = [i for i, m in enumerate(req.messages) if m.role == "user"]
+    q_idx = user_idxs[-1] if user_idxs else len(req.messages) - 1
+    message = req.messages[q_idx].content if req.messages else ""
+    sys_override = next((m.content for m in req.messages if m.role == "system"), None)
+    hist = [
+        {"role": m.role, "content": m.content}
+        for m in req.messages[:q_idx] if m.role in ("user", "assistant")
+    ]
+    if req.stream:
+        gen = smart_reply_stream(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP),
+                                 req.temperature, history=hist)
+        return StreamingResponse(
+            _openai_sse(gen, req.model),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    result = smart_reply(message, "chat", [], min(req.max_tokens, MAX_TOKENS_CAP), req.temperature,
+                         history=hist, system=sys_override)
+    return {
+        "id": f"chatcmpl-{int(time.time())}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": req.model,
+        "provider": result["provider"],
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": result["reply"]},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Universal access: /v1/models, GET /ask, embeddable widget
+# --------------------------------------------------------------------------- #
+
+# --------------------------------------------------------------------------- #
+# Teach RS AI: memory facts + corpus + fine-tune
+# --------------------------------------------------------------------------- #
+
+class MemoryIn(BaseModel):
+    text: str
+
+
+class TrainWriteIn(BaseModel):
+    text: str
+
+
+class TrainRunIn(BaseModel):
+    steps: int = 150
+    lr: float = 3e-4
+    include_memory: bool = True
+
+
+def _auth_any(authorization: str | None, token: str | None):
+    server_tok = os.environ.get("RS_API_TOKEN")
+    if server_tok and authorization != f"Bearer {server_tok}" and token != server_tok:
+        raise HTTPException(status_code=401, detail="token required")
+
+
+@app.get("/memory")
+def memory_get(token: str | None = None,
+               authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"items": learn.memory_list()}
+
+
+@app.post("/memory")
+def memory_add_route(body: MemoryIn, token: str | None = None,
+                     authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"items": learn.memory_add(body.text)}
+
+
+@app.delete("/memory/{idx}")
+def memory_del_route(idx: int, token: str | None = None,
+                     authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"items": learn.memory_delete(idx)}
+
+
+@app.get("/train/corpus")
+def train_corpus_route(token: str | None = None,
+                       authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return {"corpus_chars": learn.corpus_size(), "cap": learn.CORPUS_CAP}
+
+
+@app.post("/train/write")
+def train_write_route(body: TrainWriteIn, token: str | None = None,
+                      authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return learn.corpus_add(body.text)
+
+
+@app.get("/train/status")
+def train_status_route():
+    return learn.train_status()
+
+
+@app.post("/train/run")
+def train_run_route(body: TrainRunIn, token: str | None = None,
+                    authorization: str | None = Header(default=None)):
+    _auth_any(authorization, token)
+    return learn.run_training(model, sp, cfg, CKPT, steps=body.steps,
+                              lr=body.lr, device=DEVICE,
+                              include_memory=body.include_memory)
+
+
+@app.get("/v1/models")
+def list_models():
+    """OpenAI-compatible model list — needed by ChatBox / Open WebUI / etc."""
+    data = [{
+        "id": "rs-gpt", "object": "model",
+        "created": 1757000000, "owned_by": "rs-team",
+    }]
+    if CHAIN and CHAIN[0].name != "rs-gpt-local":
+        data.append({
+            "id": CHAIN[0].name, "object": "model",
+            "created": 1757000000, "owned_by": CHAIN[0].key or "external",
+        })
+    return {"object": "list", "data": data}
+
+
+@app.get("/ask")
+def ask_get(q: str, mode: str = "chat", max_tokens: int = 300,
+            token: str | None = None,
+            authorization: str | None = Header(default=None)):
+    """Easy GET endpoint — great for iOS Shortcuts, Tasker, browser links.
+
+    Auth: header Bearer token OR ?token= query param (if RS_API_TOKEN set)."""
+    server_tok = os.environ.get("RS_API_TOKEN")
+    if server_tok and authorization != f"Bearer {server_tok}" and token != server_tok:
+        raise HTTPException(status_code=401, detail="token required")
+    t0 = time.time()
+    mode = mode if mode in MODES else "chat"
+    result = smart_reply(q, mode, [], min(max_tokens, 1000), 0.7)
+    result["latency_ms"] = int((time.time() - t0) * 1000)
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# /diagnose — server self-test for users debugging their deployment
+# --------------------------------------------------------------------------- #
+
+@app.get("/diagnose")
+def diagnose(token: str | None = None,
+             authorization: str | None = Header(default=None)):
+    """Live self-test: each provider tried with a tiny prompt, capabilities list.
+
+    Protected by RS_API_TOKEN (header or ?token=) when one is configured."""
+    server_tok = os.environ.get("RS_API_TOKEN")
+    if server_tok and authorization != f"Bearer {server_tok}" and token != server_tok:
+        raise HTTPException(status_code=401, detail="token required")
+
+    providers_report = []
+    for p in CHAIN:
+        entry = {"name": p.name, "family": p.family}
+        if p.family == "local":
+            t0 = time.time()
+            try:
+                _ = local_reply("hi", max_tokens=4, temperature=0.5)
+                entry["status"] = "ok"
+                entry["latency_ms"] = int((time.time() - t0) * 1000)
+            except Exception as e:  # noqa: BLE001
+                entry["status"] = "error"
+                entry["error"] = repr(e)
+        else:
+            if hasattr(p, "api_key"):
+                key = getattr(p, "api_key")
+                entry["key"] = "…" + key[-4:] if key else "missing"
+            entry["think_model"] = think_model_for(p)
+            entry["vision_model"] = vision_model_for(p)
+            t0 = time.time()
+            old_to = getattr(p, "timeout", 90)
+            try:
+                p.timeout = 20
+                reply = p.chat("Reply with exactly: pong", max_tokens=8, temperature=0)
+                entry["status"] = "ok"
+                entry["latency_ms"] = int((time.time() - t0) * 1000)
+                entry["sample"] = reply[:60]
+            except Exception as e:  # noqa: BLE001
+                entry["status"] = "unreachable"
+                entry["error"] = repr(e)[:200]
+            finally:
+                p.timeout = old_to
+        providers_report.append(entry)
+
+    return {
+        "version": "1.3.x",
+        "model": {"params": N_PARAMS, "vocab": cfg.vocab_size, "ctx": cfg.block_size},
+        "device": DEVICE,
+        "gpu_available": torch.cuda.is_available(),
+        "tokenizer": sp_path,
+        "checkpoint": CKPT,
+        "providers": providers_report,
+        "active": CHAIN[0].name if CHAIN else "none",
+        "image_mode": {
+            "provider": os.environ.get("RS_IMAGE_MODEL", "pollinations-free (key-less)"),
+            "ok": True,
+        },
+        "research_mode": "needs external provider + internet",
+        "modes": MODES,
+        "rate_limit_per_min": RATE_LIMIT,
+        "python": sys.version.split()[0],
+        "torch": torch.__version__,
+    }
+
+
+WIDGET_DEMO_HTML = r"""<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RS AI Widget Demo</title>
+<style>
+  body { font-family: system-ui; background: #0f172a; color: #e2e8f0; padding: 40px; max-width: 720px; margin: auto; }
+  h1 { color: #a78bfa; }
+  pre { background: #1e293b; padding: 14px; border-radius: 10px; overflow-x: auto; font-size: 14px; }
+  code { color: #c4b5fd; }
+  p { line-height: 1.7; }
+</style>
+</head>
+<body>
+<h1>RS AI Widget 🤖</h1>
+<p>ඔයාගේ website එකට RS AI add කරන්න — <b>script tag එකක්යි ඕන</b>. මේ page එකේම පහළින් දකුණු කෙළවරේ live widget එක බලන්න:</p>
+<pre><code>&lt;script src="YOUR_SERVER/static/widget.js"&gt;&lt;/script&gt;</code></pre>
+<p>Token protected server නම්:</p>
+<pre><code>&lt;script src="YOUR_SERVER/static/widget.js" data-token="YOUR_RS_API_TOKEN"&gt;&lt;/script&gt;</code></pre>
+<p>CORS open නිසා ඕනම domain එකකින් වැඩ කරයි. Production වලදී main.py වල allow_origins එක custom කරන්න.</p>
+<script src="/static/widget.js"></script>
+</body>
+</html>
+"""
+
+
+@app.get("/widget-demo", response_class=HTMLResponse)
+def widget_demo():
+    return WIDGET_DEMO_HTML
+
+
+CHAT_HTML = r"""<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>RS AI — සිංහල AI Chat</title>
+<link rel="manifest" href="/static/manifest.webmanifest">
+<meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<link rel="icon" type="image/png" href="/static/icon-192.png">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: 'Segoe UI', 'Noto Sans Sinhala', system-ui, sans-serif;
+    background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%);
+    color: #e2e8f0; height: 100dvh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 12px 16px; display: flex; align-items: center; gap: 12px;
+    background: rgba(15,23,42,.75); backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(148,163,184,.15);
+  }
+  .logo {
+    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+    font-size: 20px; background: linear-gradient(135deg,#7c3aed,#4f46e5);
+  }
+  header h1 { font-size: 18px; font-weight: 700; }
+  header .sub { font-size: 12px; color: #94a3b8; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#4ade80; display:inline-block; margin-right:5px;
+         box-shadow: 0 0 8px #4ade80; }
+  #chat { flex: 1; overflow-y: auto; padding: 16px 14px 8px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 84%; padding: 11px 15px; border-radius: 18px; line-height: 1.55;
+         font-size: 15px; white-space: pre-wrap; word-wrap: break-word; animation: pop .25s ease; }
+  @keyframes pop { from { opacity:0; transform: translateY(6px);} to { opacity:1; } }
+  .user { align-self: flex-end; background: linear-gradient(135deg,#7c3aed,#4f46e5);
+          color: white; border-bottom-right-radius: 5px; }
+  .bot  { align-self: flex-start; background: #1e293b; border: 1px solid rgba(148,163,184,.12);
+          border-bottom-left-radius: 5px; }
+  .bot img { max-width: 100%; border-radius: 10px; display: block; }
+  .sources { margin-top: 8px; font-size: 12px; color: #94a3b8; }
+  .sources a { color: #a78bfa; text-decoration: none; display: block; padding: 2px 0; }
+  .mrow { display:flex; gap:6px; overflow-x:auto; padding: 4px 12px 8px; scrollbar-width:none; }
+  .mrow::-webkit-scrollbar { display:none; }
+  .mchip { flex:0 0 auto; background:#16203a; border:1px solid rgba(148,163,184,.22); color:#cbd5e1;
+           padding:7px 12px; border-radius:999px; font-size:13px; cursor:pointer; }
+  .mchip.on { background: linear-gradient(135deg,#7c3aed,#4f46e5); color:#fff; border-color: transparent; }
+  .mchip.spk { margin-left:auto; }
+  .mchip.on.spk { background:#065f46; }
+  .attrow { display:flex; gap:6px; flex-wrap:wrap; padding: 0 12px 6px; }
+  .attchip { background:#312e81; color:#e0e7ff; font-size:12px; padding:6px 10px; border-radius:8px;
+             display:flex; gap:6px; align-items:center; }
+  .attchip b { cursor:pointer; color:#f87171; }
+  footer { padding: 8px 10px; background: rgba(15,23,42,.92); border-top: 1px solid rgba(148,163,184,.15);
+           display: flex; gap: 6px; align-items: flex-end; }
+  .ibtn {
+    background: #1e293b; border: 1px solid rgba(148,163,184,.18); color: #cbd5e1;
+    width: 42px; height: 42px; border-radius: 50%; font-size: 17px; cursor: pointer; flex: 0 0 auto;
+  }
+  .ibtn.rec { border-color:#f87171; color:#f87171; }
+  input#inp {
+    flex: 1; min-width: 60px; background: #1e293b; border: 1px solid rgba(148,163,184,.25); border-radius: 22px;
+    padding: 12px 16px; color: #e2e8f0; font-size: 15px; outline: none;
+  }
+  input#inp:focus { border-color: #7c3aed; }
+  #send {
+    background: linear-gradient(135deg,#7c3aed,#4f46e5); border: none; color: white;
+    width: 44px; height: 44px; border-radius: 50%; font-size: 18px; cursor: pointer; flex: 0 0 auto;
+  }
+  #send:disabled { opacity: .5; }
+  .typing { display:inline-flex; gap:4px; padding: 14px 16px; }
+  .typing span { width:7px; height:7px; border-radius:50%; background:#94a3b8; animation: blink 1.2s infinite; }
+  .typing span:nth-child(2){ animation-delay:.2s } .typing span:nth-child(3){ animation-delay:.4s }
+  @keyframes blink { 0%,60%,100%{opacity:.3} 30%{opacity:1} }
+
+#drawer{position:fixed;top:0;left:0;height:100dvh;width:250px;background:#0f172a;border-right:1px solid rgba(148,163,184,.2);z-index:60;transform:translateX(-102%);transition:transform .22s;padding:14px;overflow-y:auto;}
+#drawer.open{transform:none;}
+.dr-title{display:flex;justify-content:space-between;align-items:center;color:#e2e8f0;font-weight:600;font-size:15px;padding-bottom:10px;border-bottom:1px solid rgba(148,163,184,.15);}
+#newchat{color:#a78bfa;font-size:13px;cursor:pointer;}
+.chatitem{padding:9px 10px;border-radius:10px;margin-top:8px;cursor:pointer;font-size:13px;color:#cbd5e1;display:flex;justify-content:space-between;gap:6px;background:#1e293b;}
+.chatitem.on{outline:1.5px solid #7c3aed;}
+.chatitem b{color:#f87171;font-weight:700;}
+#teachdlg{position:fixed;inset:0;background:rgba(2,6,23,.6);display:none;place-items:center;z-index:70;padding:16px;}
+#teachdlg:not([hidden]){display:grid;}
+.teach-card{width:min(520px,96vw);max-height:88dvh;overflow-y:auto;background:#0f172a;border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:16px;}
+.teach-head{color:#e2e8f0;font-weight:700;display:flex;justify-content:space-between;font-size:15px;}
+#teachclose{cursor:pointer;color:#94a3b8;font-size:22px;padding:4px 10px;line-height:1;}
+.teach-x{display:block;margin-top:14px;text-align:center;color:#a78bfa;font-weight:700;font-size:14px;cursor:pointer;padding:10px;border:1px solid rgba(167,139,250,.35);border-radius:10px;}
+#teachtext{width:100%;margin-top:10px;background:#1e293b;border:1px solid rgba(148,163,184,.25);border-radius:10px;color:#e2e8f0;padding:10px;font-size:14px;resize:vertical;box-sizing:border-box;}
+.teach-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.teach-row button{background:linear-gradient(135deg,#7c3aed,#4f46e5);border:none;color:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-size:13px;}
+#teachstatus{color:#94a3b8;font-size:12px;margin-top:10px;white-space:pre-wrap;}
+.memchip{display:flex;justify-content:space-between;gap:8px;background:#1e293b;border-radius:8px;padding:6px 8px;margin-top:6px;color:#cbd5e1;font-size:12px;}
+.memchip b{color:#f87171;cursor:pointer;flex:none;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🤖</div>
+  <div>
+    <h1>RS AI</h1>
+    <div class="sub"><span class="dot"></span><span id="subtxt">සබැඳිවෙමින්…</span></div>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:12px;font-size:19px;cursor:pointer;align-items:center;">
+    <span id="chats" title="Chats">📂</span>
+    <span id="teach" title="Teach RS AI">🧠</span>
+    <span id="exp" title="Export chat (markdown)">⬇</span>
+    <span id="clr" title="Clear chat">🗑️</span>
+  </div>
+</header>
+<div id="drawer">
+  <div class="dr-title">💬 චැට් ලේඛන <span id="newchat">＋ New chat</span></div>
+  <div id="chatlist"></div>
+</div>
+<div id="teachdlg" hidden>
+  <div class="teach-card">
+    <div class="teach-head">🧠 RS AIට උගන්වන්න <span id="teachclose" onclick="document.getElementById('teachdlg').hidden=true">✕</span></div>
+    <textarea id="teachtext" rows="4" placeholder="Fact එකක් ලියන්න — උදා: මගේ නම Kasun. RS AI ගේ creator RS team.""></textarea>
+    <div class="teach-row">
+      <button id="teachmem">🧠 Instant remember</button>
+      <button id="teachcorpus">⬆ Into training data</button>
+      <button id="teachrun">🏋️ Fine-tune now</button>
+    </div>
+    <div id="teachstatus"></div>
+    <div id="memlist"></div>
+    <span class="teach-x" onclick="document.getElementById('teachdlg').hidden=true">✕ Close</span>
+  </div>
+</div>
+<div id="chat">
+  <div class="msg bot">ආයුබෝවන්! 👋 මම <b>RS AI</b>. උඩ mode එකක් තෝරන්න — 💬 chat, 💡 thinking, 🔬 research, 🎨 image. Photos/files attach කරන්නත්, 🎙️ voice වලින් අහන්නත් පුළුවන්!</div>
+</div>
+<div class="mrow" id="modes">
+  <div class="mchip on" data-m="chat">💬 Chat</div>
+  <div class="mchip" data-m="think">💡 Thinking</div>
+  <div class="mchip" data-m="think_harder">🧠 Think harder</div>
+  <div class="mchip" data-m="research">🔬 Deep research</div>
+  <div class="mchip" data-m="image">🎨 Create image</div>
+  <div class="mchip spk" id="spk">🔊</div>
+  <div class="mchip" id="regen" title="Regenerate last answer">🔄</div>
+</div>
+<div class="attrow" id="atts"></div>
+<footer>
+  <button class="ibtn" id="bfile" title="Files">📁</button>
+  <button class="ibtn" id="bimg" title="Photos">🖼️</button>
+  <button class="ibtn" id="bcam" title="Camera">📷</button>
+  <button class="ibtn" id="bmic" title="Voice">🎙️</button>
+  <input id="inp" placeholder="මෙසේජ් එකක් ලියන්න…" autocomplete="off">
+  <button id="send" onclick="send()">➤</button>
+</footer>
+<input type="file" id="ffile" hidden accept=".txt,.md,.json,.csv,.log,.py,.js,.ts,.html,.css,.xml,.yaml,.yml,.ini,.toml,.sh,.java,.kt,.c,.cpp,.go,.rs,.sql,.pdf">
+<input type="file" id="fimg" hidden accept="image/*">
+<input type="file" id="fcam" hidden accept="image/*" capture="environment">
+<script>
+const chat = document.getElementById('chat');
+const inp = document.getElementById('inp');
+const sendBtn = document.getElementById('send');
+let mode = 'chat';
+let atts = [];          // {name,kind,mime,data_b64}
+let speakOn = false;
+let convo = [];         // conversation memory [{role, content}]
+let aborter = null;     // AbortController while streaming
+// 💬 multi-chat sessions (stored in localStorage)
+let chats = {};
+let activeChatId = null;
+
+function loadSessions() {
+  try { chats = JSON.parse(localStorage.getItem('rsai_chats') || '{}'); } catch (e) { chats = {}; }
+  const old = localStorage.getItem('rsai_conv');        // legacy single-convo migration
+  if (old && !Object.keys(chats).length) {
+    try {
+      const c = JSON.parse(old);
+      if (c.length) chats['c0'] = { title: 'Chat', convo: c };
+      localStorage.removeItem('rsai_conv');
+    } catch (e) {}
+  }
+}
+function saveSessions() { try { localStorage.setItem('rsai_chats', JSON.stringify(chats)); } catch (e) {} }
+function newChatId() { return 'c' + Date.now() + Math.floor(Math.random() * 999); }
+function ensureActive() {
+  if (!activeChatId || !chats[activeChatId]) {
+    activeChatId = newChatId();
+    chats[activeChatId] = { title: 'New chat', convo: [] };
+    saveSessions();
+  }
+  return chats[activeChatId];
+}
+function cur() { return chats[activeChatId]; }
+function saveConvo() {
+  if (!activeChatId) ensureActive();
+  const c = cur();
+  c.convo = convo.slice(-40);
+  if (c.title === 'New chat') {
+    const firstUser = c.convo.find(m => m.role === 'user');
+    if (firstUser) c.title = firstUser.content.slice(0, 26);
+  }
+  saveSessions();
+  renderChatList();
+}
+function drawer(open_) { document.getElementById('drawer').classList.toggle('open', open_); }
+function renderChatList() {
+  const el = document.getElementById('chatlist');
+  if (!el) return;
+  el.innerHTML = '';
+  Object.keys(chats).reverse().forEach(id => {
+    const c = chats[id];
+    const d = document.createElement('div');
+    d.className = 'chatitem' + (id === activeChatId ? ' on' : '');
+    d.textContent = (c.title || 'Chat').slice(0, 24);
+    const x = document.createElement('b');
+    x.textContent = '✕';
+    x.onclick = (ev) => {
+      ev.stopPropagation();
+      delete chats[id];
+      if (id === activeChatId) {
+        activeChatId = null;
+        ensureActive();
+        convo = cur().convo.slice();
+        chat.innerHTML = '';
+        if (convo.length) rebuildConvoDom(); else add('ආයුබෝවන්! 👋 අලුත් chat එකක් 🤖', 'bot');
+      }
+      saveSessions();
+      renderChatList();
+    };
+    d.appendChild(x);
+    d.onclick = () => {
+      saveConvo();
+      activeChatId = id;
+      convo = (cur().convo || []).slice();
+      rebuildConvoDom();
+      renderChatList();
+      drawer(false);
+    };
+    el.appendChild(d);
+  });
+}
+document.getElementById('chats').onclick = () => { renderChatList(); drawer(true); };
+document.getElementById('newchat').onclick = () => {
+  saveConvo();
+  activeChatId = null;
+  ensureActive();
+  convo = [];
+  chat.innerHTML = '';
+  add('ආයුබෝවන්! 👋 අලුත් chat එකක් — මම RS AI 🤖', 'bot');
+  renderChatList();
+  drawer(false);
+};
+
+// 🧠 teach panel — memory facts + training corpus + fine-tune
+const teachdlg = document.getElementById('teachdlg');
+document.getElementById('teach').onclick = () => { teachdlg.hidden = false; loadMemList(); };
+document.getElementById('teachclose').onclick = () => { teachdlg.hidden = true; };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') teachdlg.hidden = true; });
+teachdlg.addEventListener('click', e => { if (e.target === teachdlg) teachdlg.hidden = true; });
+
+function teachStatusSet(t) { document.getElementById('teachstatus').textContent = t; }
+async function loadMemList() {
+  const el = document.getElementById('memlist');
+  try {
+    const r = await fetch('/memory', { headers: authHeaders() });
+    const j = await r.json();
+    el.innerHTML = '';
+    (j.items || []).forEach((m, i) => {
+      const d = document.createElement('div');
+      d.className = 'memchip';
+      const spanTxt = document.createElement('span');
+      spanTxt.textContent = m.slice(0, 70);
+      const x = document.createElement('b');
+      x.textContent = '✕';
+      x.onclick = async () => {
+        await fetch('/memory/' + i, { method: 'DELETE', headers: authHeaders() });
+        loadMemList();
+      };
+      d.appendChild(spanTxt); d.appendChild(x); el.appendChild(d);
+    });
+    if (!(j.items || []).length) {
+      el.innerHTML = '<div style="color:#64748b;font-size:12px;margin-top:8px;">facts නෑ — උඩ text field එකේ ලියලා "Instant remember" ☝️</div>';
+    }
+  } catch (e) { /* silent */ }
+}
+document.getElementById('teachmem').onclick = async () => {
+  const t = document.getElementById('teachtext').value.trim();
+  if (!t) return;
+  teachStatusSet('⏳…');
+  try {
+    const r = await fetch('/memory', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ text: t }) });
+    const j = await r.json();
+    teachStatusSet('✅ Instant memory! ✅ ' + (j.items || []).length + ' facts — ඊලඟ chat වලදී auto use වෙනවා.');
+    loadMemList();
+  } catch (e) { teachStatusSet('⚠️ ' + e.message); }
+};
+document.getElementById('teachcorpus').onclick = async () => {
+  const t = document.getElementById('teachtext').value.trim();
+  if (!t) return;
+  teachStatusSet('⏳…');
+  try {
+    const r = await fetch('/train/write', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ text: t }) });
+    const j = await r.json();
+    teachStatusSet(j.ok ? `⬆ training data ✔ (${j.corpus_chars} chars) — "Fine-tune now" click කරන්න brain update එකට`
+                        : '⚠️ ' + (j.error || 'error'));
+  } catch (e) { teachStatusSet('⚠️ ' + e.message); }
+};
+document.getElementById('teachrun').onclick = async () => {
+  teachStatusSet('⏳ starting fine-tune…');
+  try {
+    const r = await fetch('/train/run', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ steps: 150 }) });
+    const j = await r.json();
+    if (!j.ok) { teachStatusSet('⚠️ ' + (j.error || 'error')); return; }
+    teachStatusSet('🏋️ fine-tune පටන්ගත්තා…');
+    const timer = setInterval(async () => {
+      try {
+        const st = await (await fetch('/train/status')).json();
+        if (st.running) {
+          teachStatusSet(`🏋️ ${st.step}/${st.total} steps · loss ${Number(st.loss || 0).toFixed(3)}`);
+        } else {
+          clearInterval(timer);
+          teachStatusSet(st.error ? '⚠️ ' + st.error
+            : `🎉 fine-tune done! (${(st.last_run || {}).steps || 0} steps, brain hot-swapped — දැන්ම chat එකෙන් test කරන්න!)`);
+        }
+      } catch (e) { clearInterval(timer); }
+    }, 1200);
+  } catch (e) { teachStatusSet('⚠️ ' + e.message); }
+};
+
+
+inp.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+// optional API token (?token=XXXX once)
+const qs = new URLSearchParams(location.search);
+if (qs.get('token')) {
+  localStorage.setItem('rsai_token', qs.get('token'));
+  history.replaceState({}, '', location.pathname);
+}
+function authHeaders() {
+  const t = localStorage.getItem('rsai_token');
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+
+// mode chips
+document.getElementById('modes').addEventListener('click', e => {
+  const c = e.target.closest('.mchip');
+  if (!c || c.id === 'spk' || c.id === 'regen') return;
+  document.querySelectorAll('#modes .mchip').forEach(x => x.classList.remove('on'));
+  c.classList.add('on');
+  mode = c.dataset.m;
+  inp.placeholder = mode === 'image' ? 'ඇඳන්න ඕන දේ ලියන්න… 🎨'
+                  : mode === 'research' ? '🔬 research කරන මාතෘකාව…'
+                  : 'මෙසේජ් එකක් ලියන්න…';
+  inp.focus();
+});
+
+// speaker toggle
+const spk = document.getElementById('spk');
+spk.onclick = () => {
+  speakOn = !speakOn;
+  spk.classList.toggle('on', speakOn);
+  if (!speakOn && window.speechSynthesis) speechSynthesis.cancel();
+};
+function speak(text) {
+  if (!speakOn || !window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(text.slice(0, 900));
+  u.lang = /[\u0D80-\u0DFF]/.test(text) ? 'si-LK' : 'en-US';
+  speechSynthesis.speak(u);
+}
+
+// attachments
+const ffile = document.getElementById('ffile');
+const fimg = document.getElementById('fimg');
+const fcam = document.getElementById('fcam');
+document.getElementById('bfile').onclick = () => ffile.click();
+document.getElementById('bimg').onclick = () => fimg.click();
+document.getElementById('bcam').onclick = () => fcam.click();
+[ffile, fimg, fcam].forEach(f => f.addEventListener('change', () => {
+  const file = f.files[0];
+  f.value = '';
+  if (!file) return;
+  if (atts.length >= 3) { add('⚠️ files 3ක් දක්වායි', 'bot'); return; }
+  if (file.size > 3 * 1024 * 1024) { add(`⚠️ '${file.name}' ලොකු වැඩියි (max 3MB)`, 'bot'); return; }
+  const rd = new FileReader();
+  rd.onload = () => {
+    const b64 = String(rd.result).split(',')[1] || '';
+    atts.push({ name: file.name, kind: file.type.startsWith('image/') ? 'image' : 'file',
+                mime: file.type || 'application/octet-stream', data_b64: b64 });
+    renderAtts();
+  };
+  rd.readAsDataURL(file);
+}));
+function renderAtts() {
+  const row = document.getElementById('atts');
+  row.innerHTML = '';
+  atts.forEach((a, i) => {
+    const c = document.createElement('div');
+    c.className = 'attchip';
+    c.innerHTML = `${a.kind === 'image' ? '🖼️' : '📄'} ${a.name.slice(0, 22)}`;
+    const x = document.createElement('b');
+    x.textContent = ' ✕';
+    x.onclick = () => { atts.splice(i, 1); renderAtts(); };
+    c.appendChild(x);
+    row.appendChild(c);
+  });
+}
+
+// voice input
+const bmic = document.getElementById('bmic');
+let recog = null;
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recog = new SR();
+  recog.lang = 'si-LK';
+  recog.interimResults = false;
+  recog.onresult = e => { inp.value = e.results[0][0].transcript; inp.focus(); };
+  recog.onend = () => bmic.classList.remove('rec');
+}
+bmic.onclick = () => {
+  if (!recog) { add('🎙️ මේ browser එකේ voice input නැහැ (Chrome try කරන්න)', 'bot'); return; }
+  try { recog.start(); bmic.classList.add('rec'); } catch (e) { recog.stop(); }
+};
+
+fetch('/health').then(r => r.json()).then(h => {
+  const el = document.getElementById('subtxt');
+  el.textContent = (h.active && h.active !== 'rs-gpt-local')
+    ? '⚡ smart · ' + h.active : 'සබැඳි · Sinhala + English · RS-GPT';
+}).catch(() => { document.getElementById('subtxt').textContent = 'සබැඳි'; });
+
+function add(text, cls) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.textContent = text;
+  if (cls === 'bot') {
+    d.title = '📋 click to copy';
+    d.onclick = () => {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(d.textContent);
+        d.title = '✅ copied!';
+        setTimeout(() => d.title = '📋 click to copy', 1200);
+      }
+    };
+  }
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+  return d;
+}
+function typingBubble() {
+  const labels = { chat: 'ටයිප් කරමින්', think: '💡 හිතමින්', think_harder: '🧠 ගැඹුරුව හිතමින්',
+                   research: '🔬 research කරමින්', image: '🎨 image හදමින්' };
+  const t = document.createElement('div');
+  t.className = 'msg bot typing';
+  t.title = labels[mode] || '';
+  t.innerHTML = '<span></span><span></span><span></span>&nbsp;' + (labels[mode] || '');
+  chat.appendChild(t);
+  chat.scrollTop = chat.scrollHeight;
+  return t;
+}
+
+async function send() {
+  if (aborter) { aborter.abort(); return; }      // ⏹ acts as STOP while streaming
+  const text = inp.value.trim();
+  if (!text && atts.length === 0) return;
+  add(text ? text + (atts.length ? `\n📎 ${atts.length} attachment(s)` : '')
+           : `📎 ${atts.length} attachment(s)`, 'user');
+  inp.value = '';
+  const payload = { message: text || '(attachment)', mode, attachments: atts,
+                    history: convo.slice(-10), stream: true };
+  atts = []; renderAtts();
+  convo.push({ role: 'user', content: text || '(attachment)' });
+  saveConvo();
+  sendBtn.textContent = '⏹';
+  aborter = new AbortController();
+  const t = typingBubble();
+  let bubble = null, acc = '', meta = null;
+  try {
+    const r = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+      signal: aborter.signal
+    });
+    if (r.status === 401) {
+      t.remove();
+      add('🔑 API token එක වැරදියි — URL එකට ?token=XXXX දාලා ආයේ open කරන්න', 'bot');
+      convo.pop(); return;
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const raw = buf.slice(0, i); buf = buf.slice(i + 2);
+        const line = raw.split('\n').find(l => l.startsWith('data:'));
+        if (!line) continue;
+        let j; try { j = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+        if (j.delta != null) {
+          acc += j.delta;
+          if (!bubble) { t.remove(); bubble = add(acc, 'bot'); }
+          else { bubble.textContent = acc; }
+          chat.scrollTop = chat.scrollHeight;
+        } else if (j.done) meta = j;
+      }
+    }
+    if (!bubble) { t.remove(); bubble = add('…', 'bot'); }
+    if (meta && meta.image_url) {
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = meta.image_url;
+      img.onclick = () => window.open(meta.image_url, '_blank');
+      bubble.appendChild(document.createElement('br'));
+      bubble.appendChild(img);
+    }
+    if (meta && meta.sources && meta.sources.length) {
+      const sDiv = document.createElement('div');
+      sDiv.className = 'sources';
+      sDiv.innerHTML = '<b>📚 මූලාශ්‍ර</b>';
+      meta.sources.forEach(x => {
+        const a = document.createElement('a');
+        a.href = x.url; a.target = '_blank';
+        a.textContent = '• ' + x.title;
+        sDiv.appendChild(a);
+      });
+      bubble.appendChild(document.createElement('br'));
+      bubble.appendChild(sDiv);
+    }
+    convo.push({ role: 'assistant', content: acc });
+    saveConvo();
+    speak(acc);
+  } catch (e) {
+    t.remove();
+    if (!bubble && !acc) add('⚠️ දෝෂයක්: ' + e.message, 'bot');
+    else if (acc && bubble) bubble.textContent = acc + '\n\n⏹';
+    convo.push({ role: 'assistant', content: acc || '…' });
+    saveConvo();
+  }
+  aborter = null;
+  sendBtn.textContent = '➤';
+}
+
+// header actions: export + clear
+document.getElementById('exp').onclick = () => {
+  if (!convo.length) return;
+  const txt = convo.map(m => (m.role === 'user' ? '🧑 ' : '🤖 ') + m.content).join('\n\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['# RS AI Chat\n\n' + txt], { type: 'text/markdown' }));
+  a.download = 'rs-ai-chat.md';
+  a.click();
+};
+document.getElementById('clr').onclick = () => {
+  convo = [];
+  saveConvo();
+  chat.innerHTML = '';
+  add('ආයුබෝවන්! 👋 මම <b>RS AI</b>. අලුතෙන් පටන් ගමු!', 'bot');
+};
+
+
+// 🔄 regenerate: drop last exchange, rebuild, resend
+function rebuildConvoDom() {
+  chat.innerHTML = '';
+  convo.forEach(m => add(m.content, m.role === 'user' ? 'user' : 'bot'));
+}
+document.getElementById('regen').onclick = () => {
+  if (aborter) return;
+  let i = convo.length - 1;
+  while (i >= 0 && convo[i].role === 'assistant') i--;
+  if (i < 0) { add('ආයේ හදන්න කිසිම පන්හිදන message එකක් නෑ 🙂', 'bot'); return; }
+  const lastUser = convo[i].content;
+  convo = convo.slice(0, i);   // user turn will be re-added by send()
+  saveConvo();
+  rebuildConvoDom();
+  inp.value = lastUser.startsWith('(attachment') ? '' : lastUser;
+  if (lastUser.startsWith('(attachment')) { add('📎 attachments වලට regenerate නෑ — text එක ආයේ යවන්න', 'bot'); return; }
+  send();
+};
+
+// 💾 restore previous chat from localStorage
+loadSessions();
+ensureActive();
+convo = cur().convo.slice();
+if (convo.length) {
+  rebuildConvoDom();
+  chat.scrollTop = chat.scrollHeight;
+}
+renderChatList();
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return CHAT_HTML
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
