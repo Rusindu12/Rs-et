@@ -86,6 +86,7 @@ Local open-source models ([Ollama](https://ollama.com) — llama3.2/qwen2.5, PC 
 
 RS AI server එක public කරලා **ඕනම device එකකින්** use කරන්න පුළුවන්:
 * 🐳 **Dockerfile** — Hugging Face Spaces / Render / Railway / VPS
+  → Space එක හදන පියවරෙන් පියවර guide: **[docs/HF_SPACES.md](docs/HF_SPACES.md)** 🆕
 * 📱 **PWA** — browser එකෙන් "Add to Home Screen" (APK නැතුවත් app වගේ)
 * 🔑 **RS_API_TOKEN** — public server protect කිරීම
 * 🔌 **OpenAI-compatible API** — ඕනම client/SDK/app එකෙන්

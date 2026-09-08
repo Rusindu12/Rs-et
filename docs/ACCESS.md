@@ -48,7 +48,7 @@ Server එකේ built-in:
 # Colab cell එක —
 !pip install -q torch==2.2.2 "numpy<2" sentencepiece fastapi "uvicorn[standard]" requests
 # repo clone
-!git clone -b arena/01a06cd6-rs-et https://github.com/Rusindu12/Rs-et.git /content/rsai
+!git clone --depth 1 https://github.com/Rusindu12/Rs-et.git /content/rsai
 %cd /content/rsai
 import os
 os.environ["RS_PROVIDER"] = "groq"

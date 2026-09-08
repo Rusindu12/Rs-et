@@ -1,0 +1,9 @@
+# no .git in the image (faster builds, smaller image)
+.git
+.github
+
+# not needed at runtime
+android-app/
+notebooks/
+__pycache__/
+*.pyc
