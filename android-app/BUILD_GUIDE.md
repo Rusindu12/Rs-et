@@ -8,6 +8,9 @@ Android app එක: Kotlin + Jetpack Compose + Retrofit. RS AI server එකට
 **👉 [RS-AI.apk — download](https://github.com/Rusindu12/Rs-et/releases/download/apk-latest/RS-AI.apk)**
 (Release page: https://github.com/Rusindu12/Rs-et/releases/tag/apk-latest — push එකක් හැමයිම auto-update ✅)
 
+Direct file mirror (same APK, raw file): https://github.com/Rusindu12/Rs-et/tree/apk-builds → `RS-AI.apk`
+(Release/CDN blocked network එකක නම්: `curl -L https://codeload.github.com/Rusindu12/Rs-et/tar.gz/refs/heads/apk-builds -o apk.tgz`)
+
 Debug-signed — install කරන්න readyම; "unknown sources" warning එක normal (Play Store එකෙන් නෙවේ නිසා).
 
 <small>Old way: Actions tab → ඕනම successful run එක → **RS-AI-debug-apk** artifact (days 90ට expire).</small>
