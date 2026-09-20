@@ -267,7 +267,12 @@ table.matrix tr:last-child td{border-bottom:0}
   .tabsbox{grid-template-columns:repeat(2,1fr)}
   .steps{grid-template-columns:1fr}
   .safety{grid-template-columns:1fr}
-  nav.top{display:none}
+  /* keep the section links reachable on phones: wrap them onto a scrollable second row */
+  .hbar{flex-wrap:wrap}
+  nav.top{order:3;width:100%;margin:6px -4px 0;padding:0 4px 2px;gap:16px;
+    overflow-x:auto;scrollbar-width:none;white-space:nowrap;-webkit-overflow-scrolling:touch}
+  nav.top::-webkit-scrollbar{display:none}
+  nav.top a{font-size:14px}
 }
 @media (max-width:560px){
   .grid{grid-template-columns:1fr}
