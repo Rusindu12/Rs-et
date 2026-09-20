@@ -667,7 +667,13 @@ function checkAlerts(sym, price) {
     changed = true;
     return false;
   });
-  if (changed) { save(); if ($("alertModal").classList.contains("on")) paintAlerts(); }
+  if (changed) { save(); paintAlertBadge(); if ($("alertModal").classList.contains("on")) paintAlerts(); }
+}
+function paintAlertBadge() {
+  const nb = $("navBadge");
+  if (!nb) return;
+  nb.style.display = state.alerts.length ? "grid" : "none";
+  nb.textContent = state.alerts.length;
 }
 function paintAlerts() {
   const box = $("alertList");
@@ -679,7 +685,7 @@ function paintAlerts() {
       <button class="btn ghost sm" data-delalert="${a.id}">✕</button>
     </div>`).join("");
   box.querySelectorAll("[data-delalert]").forEach((b) => b.onclick = () => {
-    state.alerts = state.alerts.filter((x) => x.id !== b.dataset.delalert); save(); paintAlerts();
+    state.alerts = state.alerts.filter((x) => x.id !== b.dataset.delalert); save(); paintAlerts(); paintAlertBadge();
   });
 }
 
@@ -1692,8 +1698,13 @@ function decide(rep, klines, strat, allowShort) {
 async function botTick() {
   const b = bot(), cfg = botCfg();
   if (!b.running) return;
-  const p = paper();
-  if (p.dayPnl <= -Math.abs(cfg.dailyLoss)) { logLine(t("bot.dailyStop"), "bad"); notify(t("bot.title"), t("bot.dailyStop"), "bad"); botStop(); return; }
+  const lossSinceStart = paper().dayPnl - (b.dayStartPnl || 0);
+  if (lossSinceStart <= -Math.abs(cfg.dailyLoss)) {
+    logLine(t("bot.dailyStop") + " (" + fmtUsd(lossSinceStart) + ")", "bad");
+    notify(t("bot.title"), t("bot.dailyStop"), "bad");
+    botStop();
+    return;
+  }
   for (const sym of cfg.symbols) {
     try { await botEvalSymbol(sym, cfg); } catch (e) { logLine(sym + ": " + (e.message || e), "bad"); }
   }
@@ -1783,7 +1794,7 @@ function botStart() {
   const cfg = botCfg(), b = bot();
   if (!cfg.symbols.length) { toast(t("bot.noSymbol"), "bad"); return; }
   if (b.running) return;
-  b.running = true; b.startedAt = now(); b.stats.lastDay = paper().dayPnl;
+  b.running = true; b.startedAt = now(); b.dayStartPnl = paper().dayPnl;
   if (cfg.keep || state.settings.keep) { bc("setKeepScreenOn", true); }
   bc("setAutoOn", true);
   bc("setTradingActive", true);
@@ -2031,7 +2042,7 @@ function bindUI() {
     const price = parseFloat($("alertPrice").value);
     if (!price) { toast(t("alert.needPrice"), "bad"); return; }
     state.alerts.push({ id: uid(), sym: state.sym, price, dir: $("alertWhen").value });
-    save(); paintAlerts(); closeSheet("alertModal"); toast(t("saved"), "ok");
+    save(); paintAlerts(); paintAlertBadge(); closeSheet("alertModal"); toast(t("saved"), "ok");
   };
   $("aiBtn").onclick = aiExplain;
   $("btBtn").onclick = runBacktest;
@@ -2084,7 +2095,17 @@ function bindUI() {
 
   // settings fields
   $("setLang").onchange = (e) => { state.settings.lang = e.target.value; save(); applyI18n(); renderAll(); paintSettings(); };
-  $("setEx").onchange = (e) => { state.settings.exchange = e.target.value; save(); toast(t("saved"), "ok"); };
+  $("setEx").onchange = async (e) => {
+    state.settings.exchange = e.target.value; save();
+    toast(t("saved"), "ok");
+    closeStream();
+    state.tickers = {};
+    const ok = await fetchTickersSmart();
+    if (!ok) { demoInit(); state.dataMode = "demo"; state.dataSource = "demo"; toast(t("demo.note"), "bad", 3600); }
+    else state.dataMode = "live";
+    state.klines = await fetchKlinesSmart(state.sym, state.tf, 300);
+    startStream(); setConn(state.dataMode === "live" ? "live" : "demo"); renderAll(); renderChart();
+  };
   const toggles = [["setSound", "sound"], ["setHaptic", "haptic"], ["setTts", "tts"], ["setKeep", "keep"]];
   toggles.forEach(([id, k]) => $(id).onclick = () => {
     state.settings[k] = !state.settings[k];
@@ -2162,8 +2183,7 @@ function init() {
   startData().catch((e) => { console.warn("startData", e); setConn("off"); });
   setInterval(paintTickerStrip, 4000);
   // surface nav badge for alerts when they exist
-  const nb = $("navBadge");
-  if (state.alerts.length) { nb.style.display = "grid"; nb.textContent = state.alerts.length; }
+  paintAlertBadge();
   logLine("CryptoAI PRO ready" + (B ? " (Android)" : " (browser · paper only)"), "");
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
