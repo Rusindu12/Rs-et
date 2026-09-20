@@ -1,0 +1,3 @@
+-keep class com.cryptoai.pro.** { *; }
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+-dontwarn okhttp3.**

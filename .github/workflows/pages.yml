@@ -1,0 +1,71 @@
+name: Deploy website (GitHub Pages)
+
+# Publishes web/ to GitHub Pages. The web app under web/app/ is copied from the
+# Android assets at build time, so the site and the APK can never drift apart.
+#
+# One-time setup by the repo owner: Settings → Pages → Build and deployment →
+# Source: "GitHub Actions". After that the site lives at
+# https://<owner>.github.io/<repo>/
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "web/**"
+      - "crypto-app/app/src/main/assets/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync the web app with the Android assets
+        run: |
+          set -e
+          for f in index.html app.js ta.js; do
+            cp "crypto-app/app/src/main/assets/$f" "web/app/$f"
+          done
+          diff -q crypto-app/app/src/main/assets/index.html web/app/index.html
+          echo "web app synced: $(wc -c < web/app/app.js) bytes of app.js"
+
+      - name: Sanity-check the site
+        run: |
+          set -e
+          test -s web/index.html
+          test -s web/app/index.html && test -s web/app/app.js && test -s web/app/ta.js
+          node --check web/app/app.js
+          node --check web/app/ta.js
+          python3 -c "import json;json.load(open('web/manifest.webmanifest'))"
+          grep -q "releases/download" web/index.html || { echo "APK link missing"; exit 1; }
+          echo "site OK"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Where is it?
+        run: echo "Live at ${{ steps.deployment.outputs.page_url }}"
