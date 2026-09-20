@@ -51,7 +51,13 @@ jobs:
           grep -q "releases/download" web/index.html || { echo "APK link missing"; exit 1; }
           echo "site OK"
 
+      # enablement: true lets the workflow create the Pages site itself with the
+      # workflow token (we already request pages: write). If the token is not
+      # allowed to do that, enable it once by hand:
+      # Settings -> Pages -> Build and deployment -> Source: GitHub Actions
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:

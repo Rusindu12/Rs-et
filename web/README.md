@@ -23,7 +23,9 @@ site and the app can never drift apart.
 
 ## Deploy (GitHub Pages)
 
-1. Repo → **Settings → Pages → Build and deployment → Source: `GitHub Actions`** (one-time).
+1. The workflow now asks GitHub to create the Pages site itself (`enablement: true`). If the
+   token is not allowed to do that, enable it once by hand:
+   **Settings → Pages → Build and deployment → Source: `GitHub Actions`**.
 2. Merge this branch into `main` (or run the **Deploy website (GitHub Pages)** workflow manually).
 3. The site appears at `https://<owner>.github.io/<repo>/` — for this repo:
    `https://rusindu12.github.io/Rs-et/`
