@@ -32,9 +32,13 @@ Rs-et/
 ├── docs/ACCESS.md          # 🌍 deploy anywhere + PWA + API token guide
 ├── Dockerfile              # 🐳 one-image deploy (HF Spaces / Render / VPS)
 │
-└── android-app/            # RS AI Chat — Kotlin + Jetpack Compose app
-    ├── app/src/main/java/com/ruset/ai/
-    └── BUILD_GUIDE.md      # 📖 APK හදන ආකාරය (Android Studio, 5 min)
+├── android-app/            # RS AI Chat — Kotlin + Jetpack Compose app
+│   ├── app/src/main/java/com/ruset/ai/
+│   └── BUILD_GUIDE.md      # 📖 APK හදන ආකාරය (Android Studio, 5 min)
+└── crypto-app/             # CryptoAI PRO — crypto market/signal/trading terminal
+    ├── app/src/main/assets/index.html   #   UI (EN/සිංහල) + ta.js engine + app.js app logic
+    ├── app/src/main/java/com/cryptoai/pro/  # WebView shell + HMAC signing bridge
+    └── README.md           # 📖 features + APK link
 ```
 
 ## 🚀 Quick Start
@@ -81,6 +85,15 @@ Key/account නැතුවම දැනවත්: chain **`pollinations/openai 
 auto-select → thinking/think-harder/research-synthesis **free**. (`RS_FREE_TEXT=0` to opt-out)
 Local open-source models ([Ollama](https://ollama.com) — llama3.2/qwen2.5, PC එකෙන්ම, private):
 `RS_PROVIDER=ollama`. මුදල් ගෙවීමක් කිසිසේත් නෑ.
+
+## 📈 CryptoAI PRO (crypto terminal APK)
+
+Markets · candles (EMA/Bollinger/volume/RSI) · blended **buy/sell signal** with ATR entry-TP-SL ·
+**paper & live trading** (Binance/Bybit, keys signed on-device) · **auto-bot** with risk limits &
+daily-loss stop · price alerts · optional AI explanation — සිංහල/English දෙකෙන්ම.
+
+👉 **APK:** [releases/tag/cryptoai-apk-latest](https://github.com/Rusindu12/Rs-et/releases/tag/cryptoai-apk-latest)
+· සම්පූර්ණ විස්තර: [`crypto-app/README.md`](crypto-app/README.md)
 
 ## 🌍 Access from Anywhere
 
