@@ -28,6 +28,19 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: Check the web layer (assets must be the real app, not a placeholder)
+        working-directory: crypto-app/app/src/main/assets
+        run: |
+          set -e
+          node --check ta.js
+          node --check app.js
+          for f in index.html app.js ta.js; do test -s "$f" || { echo "missing $f"; exit 1; }; done
+          test "$(wc -c < index.html)" -gt 20000 || { echo "index.html looks like a placeholder"; exit 1; }
+          grep -q "ta.js" index.html && grep -q "app.js" index.html
+          grep -q "sigVerdict" index.html && grep -q "botLog" index.html
+          grep -q "function analyze" ta.js && grep -q "function botTick" app.js
+          echo "assets OK: index.html $(wc -c < index.html) bytes · app.js $(wc -c < app.js) bytes · ta.js $(wc -c < ta.js) bytes"
+
       - name: Build APK (debug-signed, installable)
         working-directory: crypto-app
         run: |
