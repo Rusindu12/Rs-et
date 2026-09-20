@@ -24,9 +24,16 @@ https://github.com/Rusindu12/Rs-et/releases/tag/cryptoai-apk-latest)
 |---|---|
 | 📈 **වෙළඳපොල** | Top volume / Gainers / Losers / ★ watchlist — search, 24h මිල වෙනස, mini graph |
 | 🕯️ **ප්‍රස්තාරය** | Candles + EMA 20/50, Bollinger, volume, RSI. ඇඟිල්ල අදින්න → ඒ candle එකේ O/H/L/C පෙන්වයි |
-| 🎯 **සංඥා** | **STRONG BUY → STRONG SELL** තීරණය + විශ්වාසය %, trend vs oscillator blocks, හේතු, දර්ශක 12, ATR මත entry/TP/SL, backtest |
-| 💱 **වෙළඳාම** | **පුහුණු (paper) mode** — 10,000 USDT, 0.1% ගාස්තු, buy/sell, limit, TP/SL, history |
+| 🎯 **සංඥා** | **STRONG BUY → STRONG SELL** තීරණය + විශ්වාසය %, trend vs oscillator blocks, හේතු, දර්ශක 12, ATR මත entry/TP/SL, backtest, **කාල රාමු 4ක එකඟතාව** (5m/15m/1h/4h) |
+| 💱 **වෙළඳාම** | **පුහුණු (paper) mode** — 10,000 USDT, 0.1% ගාස්තු, buy/sell, limit, TP/SL, history · **අවදානම් % මත ගණනය කරන position size calculator** · **සංඛ්‍යාලේඛන + equity curve** |
 | 🤖 **රොබෝ** | Auto-bot: උපාය 4ක්, කොයින් කිහිපයක්, max positions, cooldown, දෛනික පාඩු සීමාව |
+
+**🔎 හැම කොයින් එකක්ම එකවර:** වෙළඳපොල tab එකේ **"Scan all signals"** ඔබන්න — කොයින් 26ම
+එකම කාල රාමුවේ විශ්ලේෂණය කරලා, සංඥා ශක්තිය අනුව ශ්‍රේණිගත කරලා පෙන්වයි. ශක්තිමත්ම
+සංඥාව ඉහළින්; ඕන එකක් ඔබන්න → ඒ කොයින් එකේ ප්‍රස්තාරය.
+
+**🧮 ප්‍රමාණය නිවැරදිව ගණනය:** වෙළඳාම tab එකේ ගිණුමේ වටිනාකම + අවදානම % + නැවතුම් මිල දාන්න →
+භාවිතා කළ යුතු ප්‍රමාණය (සහ පාඩුව උපරිමය) පෙන්වයි. එක බොත්තමකින් ඇණවුමට දාන්න පුළුවන්.
 
 **භාෂාව:** උඩ දකුණේ **EN / සිං** බොත්තමෙන් සම්පූර්ණ app එක සිංහලෙන්.
 

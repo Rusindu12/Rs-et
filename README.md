@@ -97,15 +97,18 @@ Local open-source models ([Ollama](https://ollama.com) — llama3.2/qwen2.5, PC 
 ## 📈 CryptoAI PRO (crypto terminal APK)
 
 Markets · candles (EMA/Bollinger/volume/RSI) · blended **buy/sell signal** with ATR entry-TP-SL ·
-**paper & live trading** (Binance/Bybit, keys signed on-device) · **auto-bot** with risk limits &
-daily-loss stop · price alerts · optional AI explanation — සිංහල/English දෙකෙන්ම.
+**signal scanner** (26 markets ranked at once) · **multi-timeframe consensus** (5m/15m/1h/4h) ·
+**risk-based position size calculator** · **paper & live trading** (Binance/Bybit, keys signed
+on-device) · **paper statistics + equity curve** · **auto-bot** with risk limits & daily-loss
+stop · price alerts · optional AI explanation — සිංහල/English දෙකෙන්ම.
 
 👉 **APK:** [releases/tag/cryptoai-apk-latest](https://github.com/Rusindu12/Rs-et/releases/tag/cryptoai-apk-latest)
 · සම්පූර්ණ විස්තර: [`crypto-app/README.md`](crypto-app/README.md)
 
 ## 🌐 Website
 
-**https://rusindu12.github.io/Rs-et/** — landing page (EN + සිංහල) සහ **web app** එකම
+**https://rusindu12.github.io/Rs-et/** — landing page (EN + සිංහල), **සජීවී demo** එකක්
+(Binance කැන්ඩල් මත `ta.js` engine එකම browser එකේ දුවනවා), සහ **web app** එකම
 (paper mode, browser එකෙන්; "Add to Home Screen" දැම්මම app එකක් වගේ full-screen වැඩ කරයි).
 
 ```bash
