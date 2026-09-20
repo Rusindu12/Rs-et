@@ -239,6 +239,10 @@ nav .nb{position:absolute;top:4px;right:calc(50% - 22px);min-width:15px;height:1
         <button class="chip" data-sort="loss" data-i18n="sort.loss">📉 Losers</button>
         <button class="chip" data-sort="fav" data-i18n="sort.fav">★ Watchlist</button>
       </div>
+      <div class="row" style="margin:0 0 9px">
+        <button class="btn ghost sm" id="scanBtn" data-i18n="scan.run">🔎 Scan all signals</button>
+        <span class="small mut" id="scanInfo"></span>
+      </div>
       <div id="mList"></div>
       <div class="hint mt" id="mNote"></div>
     </section>
@@ -287,6 +291,14 @@ nav .nb{position:absolute;top:4px;right:calc(50% - 22px);min-width:15px;height:1
         <div class="gauge"><i id="sigRevertBar" style="width:50%;background:var(--info)"></i></div>
       </div>
       <div class="card"><h3 id="sigWhy" data-i18n="sig.why">Why</h3><div id="sigReasons"></div></div>
+      <div class="card">
+        <div class="row between">
+          <h3 style="margin:0" data-i18n="mtf.title">Multi-timeframe</h3>
+          <button class="btn ghost sm" id="mtfBtn" data-i18n="mtf.refresh">Refresh</button>
+        </div>
+        <div id="mtfRows" class="mt"></div>
+        <div class="hint mt" id="mtfNote" data-i18n="mtf.note"></div>
+      </div>
       <div class="card"><h3 data-i18n="sig.ind">Indicators</h3><div class="grid3" id="sigMetrics"></div></div>
       <div class="card" id="sigLevelsCard"><h3 data-i18n="sig.plan">Trade plan (ATR based)</h3><div class="levels" id="sigLevels"></div>
         <div class="hint mt" id="sigLevelsNote"></div></div>
@@ -329,6 +341,27 @@ nav .nb{position:absolute;top:4px;right:calc(50% - 22px);min-width:15px;height:1
           <button class="btn sell" id="sellBtn">SELL<span class="k" id="sellEst">—</span></button>
         </div>
         <div class="hint mt" id="ordNote"></div>
+      </div>
+      <div class="card">
+        <h3 data-i18n="calc.title">Position size calculator</h3>
+        <div class="grid3">
+          <label class="f" style="margin:0"><span class="lb" data-i18n="calc.account">Account (USDT)</span><input id="calcAcct" type="number" inputmode="decimal" step="any"></label>
+          <label class="f" style="margin:0"><span class="lb" data-i18n="calc.risk">Risk %</span><input id="calcRisk" type="number" inputmode="decimal" step="any" value="1"></label>
+          <label class="f" style="margin:0"><span class="lb" data-i18n="calc.stop">Stop price</span><input id="calcStop" type="number" inputmode="decimal" step="any"></label>
+        </div>
+        <div class="grid3 mt">
+          <div class="metric"><div class="k" data-i18n="calc.size">Position size</div><div class="v" id="calcSize">—</div></div>
+          <div class="metric"><div class="k" data-i18n="calc.notional">Notional</div><div class="v" id="calcNotional">—</div></div>
+          <div class="metric"><div class="k" data-i18n="calc.riskAmt">Risk</div><div class="v" id="calcRiskAmt">—</div></div>
+        </div>
+        <button class="btn ghost sm block mt" id="calcUse" data-i18n="calc.use">Use this size in the order</button>
+        <div class="hint mt" id="calcNote"></div>
+      </div>
+      <div class="card">
+        <h3 data-i18n="stats.title">Paper statistics</h3>
+        <div class="grid4" id="statsBody"></div>
+        <canvas id="eqChart" height="70" style="width:100%;height:70px;display:block;margin-top:10px"></canvas>
+        <div class="tiny dim" id="statsNote"></div>
       </div>
       <div class="card"><h3 id="posTitle" data-i18n="trade.pos">Positions</h3><div id="posList"></div></div>
       <div class="card"><h3 data-i18n="trade.orders">Open orders</h3><div id="ordList"></div></div>
@@ -505,6 +538,22 @@ nav .nb{position:absolute;top:4px;right:calc(50% - 22px);min-width:15px;height:1
     <div class="bd"><div id="okBody" class="small"></div>
       <div class="row mt"><button class="btn ghost" style="flex:1" data-close="okModal" data-i18n="cancel">Cancel</button>
       <button class="btn primary" id="okYes" style="flex:1" data-i18n="confirm">Confirm</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== scan sheet ============================ -->
+<div class="modal" id="scanModal">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="hd"><h3>🔎 <span data-i18n="scan.title">Signal scan</span></h3><button class="iconbtn" data-close="scanModal">✕</button></div>
+    <div class="bd">
+      <div class="gauge"><i id="scanBar" style="width:0%;background:var(--gold)"></i></div>
+      <div class="row between mt">
+        <span class="small mut" id="scanSummary"></span>
+        <button class="btn ghost sm" id="scanStop" data-i18n="scan.stop">Stop</button>
+      </div>
+      <div id="scanList" class="mt"></div>
     </div>
   </div>
 </div>

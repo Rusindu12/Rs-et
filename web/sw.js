@@ -1,9 +1,9 @@
 /* CryptoAI PRO — service worker: offline shell for the site + the web app.
    HTML is network-first (so updates land), static assets are stale-while-revalidate.
    Exchange APIs and AI endpoints are never cached. */
-const VERSION = "cryptoai-pro-v1";
+const VERSION = "cryptoai-pro-v2";
 const SHELL = [
-  "./", "./index.html", "./manifest.webmanifest", "./og-cover.png",
+  "./", "./index.html", "./manifest.webmanifest", "./og-cover.png", "./robots.txt",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png",
   "./icons/apple-touch-icon.png", "./icons/favicon-32.png",
   "./app/", "./app/index.html", "./app/app.js", "./app/ta.js"
