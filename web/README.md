@@ -5,7 +5,10 @@ support so it can be installed to the home screen.
 
 ```
 web/
-├── index.html            landing page (bilingual, live price strip, phone preview, FAQ)
+├── index.html            landing page: hero + animated chart, live price strip, stats band,
+│                         interactive live demo (real ta.js on live candles), phone preview,
+│                         features, included-matrix, install, safety, FAQ
+├── robots.txt · sitemap.xml  search-engine files
 ├── app/                  the web app — index.html, app.js, ta.js
 ├── manifest.webmanifest  PWA: name, icons, start_url ./app/, shortcuts
 ├── sw.js                 service worker: offline shell, never caches exchange APIs
@@ -35,6 +38,14 @@ cd web && python3 -m http.server 8080     # → http://localhost:8080
 ```
 The landing page and the web app both work from a plain static server (the app falls
 back to clearly-labelled demo data when it cannot reach an exchange).
+
+## The live demo on the landing page
+
+The `#demo` section loads candles straight from Binance and runs **`app/ta.js`** — the exact
+engine file the APK ships — in the visitor's browser, then shows the verdict, the confidence,
+the reasons, ATR-based entry/target/stop, six indicator metrics and a fee-aware backtest on the
+same candles. If the exchange is unreachable it falls back to clearly-labelled synthetic candles
+(“the engine and the maths are real, the prices are not”), so the section never lies about data.
 
 ## Note on live trading
 

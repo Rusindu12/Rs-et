@@ -22,6 +22,12 @@
 <meta name="twitter:description" content="Live markets, candles, signals with entry/TP/SL, paper + live trading, auto-bot. APK + web app.">
 <meta name="twitter:image" content="https://rusindu12.github.io/Rs-et/og-cover.png">
 
+<meta name="robots" content="index,follow">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="si_LK">
+<link rel="preconnect" href="https://api.binance.com" crossorigin>
+<link rel="dns-prefetch" href="https://api.binance.com">
+<link rel="sitemap" type="application/xml" href="sitemap.xml">
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
@@ -184,11 +190,78 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
 .flinks{display:flex;flex-wrap:wrap;gap:18px;font-size:14px}
 .disclaimer{color:var(--dim);font-size:12.5px;margin-top:18px;max-width:90ch}
 
+/* ---------- hero canvas ---------- */
+.hero{position:relative}
+#heroCanvas{position:absolute;inset:0;width:100%;height:100%;opacity:.55;pointer-events:none;z-index:0;
+  mask-image:linear-gradient(90deg,transparent,#000 30%,#000 70%,transparent)}
+.hero > div{position:relative;z-index:1}
+
+/* ---------- stats band ---------- */
+.band{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0c1220,#0a0e17)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;padding:26px 20px}
+.stat{text-align:center}
+.stat b{display:block;font-size:clamp(26px,3.4vw,38px);font-weight:900;letter-spacing:-.5px;
+  background:linear-gradient(120deg,var(--gold),#ffd76a);-webkit-background-clip:text;background-clip:text;color:transparent}
+.stat span{font-size:13px;color:var(--mut)}
+
+/* ---------- live demo ---------- */
+.demo{display:grid;grid-template-columns:1.05fr .95fr;gap:22px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.chip{padding:8px 13px;border-radius:999px;background:#141d31;border:1px solid var(--line);color:var(--mut);
+  font-size:13px;font-weight:700;cursor:pointer}
+.chip.on{background:rgba(240,185,11,.14);border-color:rgba(240,185,11,.45);color:var(--gold)}
+.chartwrap{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0b1120}
+#demoChart{display:block;width:100%;height:250px}
+.charttip{position:absolute;pointer-events:none;background:rgba(10,14,23,.94);border:1px solid var(--line);border-radius:8px;
+  padding:6px 9px;font-size:11px;display:none;font-variant-numeric:tabular-nums}
+.vcard{border:1px solid var(--line);border-radius:var(--r);padding:16px;background:linear-gradient(180deg,#121a2b,#0f1626)}
+.vcard.buy{border-color:rgba(14,203,129,.4);background:linear-gradient(180deg,rgba(14,203,129,.13),#0f1626)}
+.vcard.sell{border-color:rgba(246,70,93,.4);background:linear-gradient(180deg,rgba(246,70,93,.13),#0f1626)}
+.vrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.vbadge{font-size:24px;font-weight:900;letter-spacing:.4px;color:var(--mut)}
+.vcard.buy .vbadge{color:var(--up)}.vcard.sell .vbadge{color:var(--dn)}
+.gauge{height:7px;border-radius:4px;background:#1b2540;overflow:hidden;margin-top:10px}
+.gauge i{display:block;height:100%;width:0;background:var(--up);transition:width .5s ease}
+.reasons{list-style:none;margin:12px 0 0;padding:0;font-size:13.6px;color:#c9d4ea}
+.reasons li{padding:6px 0 6px 20px;position:relative;border-bottom:1px dashed rgba(31,42,66,.85)}
+.reasons li:last-child{border-bottom:0}
+.reasons li::before{content:"•";position:absolute;left:4px;color:var(--gold)}
+.lrow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
+.lrow div{background:#101728;border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;font-size:10.5px;color:var(--dim)}
+.lrow b{display:block;font-size:14px;color:var(--txt);font-variant-numeric:tabular-nums}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.mini div{background:#101728;border:1px solid var(--line);border-radius:10px;padding:8px}
+.mini .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+.mini .v{font-size:14px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.btline{margin-top:12px;font-size:13px;color:var(--mut)}
+.btline b{color:var(--txt)}
+.srcnote{font-size:11.5px;color:var(--dim);margin-top:10px}
+.srcnote.warn{color:var(--gold)}
+.demo-cta{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
+.block{display:block;width:100%}
+
+/* ---------- included matrix ---------- */
+.cmp{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--card)}
+table.matrix{width:100%;border-collapse:collapse;min-width:560px;font-size:14.5px}
+table.matrix th,table.matrix td{padding:13px 16px;text-align:left;border-bottom:1px solid var(--line)}
+table.matrix thead th{font-size:12.5px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);background:#0f1626}
+table.matrix thead th:nth-child(2){color:var(--gold)}
+table.matrix td:nth-child(2),table.matrix td:nth-child(3){text-align:center;font-weight:700}
+table.matrix tr:last-child td{border-bottom:0}
+.yes{color:var(--up)}.no{color:var(--dim)}
+.fineprint{font-size:12px;color:var(--dim);margin-top:10px}
+
 /* ---------- misc ---------- */
 .reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
 .reveal.in{opacity:1;transform:none}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}}
+.skip{position:absolute;left:-9999px;top:0;background:var(--gold);color:#1a1200;padding:10px 14px;border-radius:0 0 10px 0;font-weight:700;z-index:50}
+.skip:focus{left:0}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}#heroCanvas{display:none}}
 @media (max-width:960px){
+  .demo{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
   .hero{grid-template-columns:1fr;gap:34px}
   .grid{grid-template-columns:repeat(2,1fr)}
   .tabsbox{grid-template-columns:repeat(2,1fr)}
@@ -211,6 +284,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
 </style>
 </head>
 <body>
+<a class="skip" href="#features" data-i18n="a11y.skip">Skip to content</a>
 
 <header>
   <div class="hbar">
@@ -223,6 +297,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
     <nav class="top">
       <a href="#features" data-i18n="nav.features">Features</a>
       <a href="#inside" data-i18n="nav.inside">Inside the app</a>
+      <a href="#demo" data-i18n="nav.demo">Live demo</a>
       <a href="#install" data-i18n="nav.install">Install</a>
       <a href="#faq" data-i18n="nav.faq">FAQ</a>
       <a href="https://github.com/Rusindu12/Rs-et" target="_blank" rel="noopener">GitHub</a>
@@ -237,6 +312,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
 <main>
   <!-- ============================= hero ============================= -->
   <section class="hero wrap">
+    <canvas id="heroCanvas" aria-hidden="true"></canvas>
     <div>
       <div class="eyebrow" data-i18n="hero.eyebrow">සිංහල + English · free · open source</div>
       <h1><span data-i18n="hero.h1a">Your crypto market,</span><br><span data-i18n="hero.h1b">signals and bot — in one place</span></h1>
@@ -268,7 +344,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
         <div class="screen">
           <div class="sbar">
             <span class="dot"></span><span class="nm">BTC/USDT</span>
-            <span class="mut" data-i18n="phone.live">live · 5m</span>
+            <span class="mut" id="pvTf" data-i18n="phone.live">live · 1h</span>
           </div>
           <div class="sbody">
             <div class="chartbox">
@@ -282,15 +358,15 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
                 <circle cx="292" cy="34" r="4" fill="#0ecb81"/>
               </svg>
             </div>
-            <div class="verd">
-              <div class="v" data-i18n="phone.verdict">BUY</div>
-              <div class="m">BTC/USDT · 5m · <span data-i18n="phone.conf">confidence 66%</span></div>
-              <div class="bar"><i></i></div>
+            <div class="verd" id="pvCard">
+              <div class="v" id="pvBadge" data-i18n="phone.verdict">BUY</div>
+              <div class="m"><span id="pvPair">BTC/USDT · 1h</span> · <span id="pvConf" data-i18n="phone.conf">confidence 66%</span></div>
+              <div class="bar"><i id="pvBar"></i></div>
             </div>
             <div class="lv">
-              <div><span data-i18n="phone.entry">Entry</span><b>63,940</b></div>
-              <div><span data-i18n="phone.tp">Target</span><b class="up">65,120</b></div>
-              <div><span data-i18n="phone.sl">Stop</span><b class="dn">63,180</b></div>
+              <div><span data-i18n="phone.entry">Entry</span><b id="pvEntry">63,940</b></div>
+              <div><span data-i18n="phone.tp">Target</span><b class="up" id="pvTp">65,120</b></div>
+              <div><span data-i18n="phone.sl">Stop</span><b class="dn" id="pvSl">63,180</b></div>
             </div>
           </div>
           <div class="sn">
@@ -303,6 +379,55 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
         </div>
       </div>
       <p class="center tiny mut" style="margin-top:12px" data-i18n="phone.note">Interface preview — the same layout runs in the app and in the web app.</p>
+    </div>
+  </section>
+
+  <!-- ============================ stats band ========================= -->
+  <section class="band" style="padding:0" aria-label="At a glance">
+    <div class="wrap stats">
+      <div class="stat"><b data-count="26">0</b><span data-i18n="stat.pairs">markets scanned at once</span></div>
+      <div class="stat"><b data-count="12">0</b><span data-i18n="stat.indicators">indicators per signal</span></div>
+      <div class="stat"><b data-count="4">0</b><span data-i18n="stat.strategies">bot strategies</span></div>
+      <div class="stat"><b data-count="0">0</b><span data-i18n="stat.keys">keys needed to start</span></div>
+    </div>
+  </section>
+
+  <!-- ============================ live demo ========================== -->
+  <section id="demo" class="wrap">
+    <div class="center" style="max-width:760px;margin:0 auto 26px">
+      <div class="eyebrow" data-i18n="demo.eyebrow">Live demo · no install</div>
+      <h2 data-i18n="demo.h2">Watch the engine read real candles right here</h2>
+      <p class="mut" data-i18n="demo.sub">This is <code>ta.js</code> — the very same analysis engine that runs inside the APK — scoring live Binance candles in your browser.</p>
+    </div>
+    <div class="demo">
+      <div class="panel">
+        <div class="chips" id="demoPairs" role="group" aria-label="Market"></div>
+        <div class="chips" id="demoTfs" role="group" aria-label="Timeframe"></div>
+        <div class="chartwrap">
+          <canvas id="demoChart" role="img" aria-label="Candlestick chart of the selected market"></canvas>
+          <div class="charttip" id="demoTip"></div>
+        </div>
+        <div class="srcnote" id="demoSrc"><span data-i18n="demo.loading">Fetching candles…</span></div>
+      </div>
+      <div>
+        <div class="vcard" id="demoVerdict" aria-live="polite">
+          <div class="vrow">
+            <span class="vbadge" id="dvBadge">—</span>
+            <span class="small mut" id="dvPair">BTC/USDT · 1h</span>
+          </div>
+          <div class="gauge"><i id="dvBar"></i></div>
+          <div class="tiny mut" id="dvConf"></div>
+          <ul class="reasons" id="dvReasons"></ul>
+          <div class="lrow" id="dvLevels" hidden></div>
+        </div>
+        <div class="mini" id="dvMetrics"></div>
+        <div class="btline" id="dvBacktest"></div>
+        <div class="demo-cta">
+          <a class="btn primary block" href="app/" data-i18n="demo.open">Run it on your own screens</a>
+          <a class="btn ghost block" href="https://github.com/Rusindu12/Rs-et/releases/download/cryptoai-apk-latest/CryptoAI-PRO.apk" data-i18n="cta.apk">Download APK (Android)</a>
+        </div>
+        <p class="srcnote" data-i18n="demo.disc">Educational analysis, not investment advice. Past performance does not predict the future.</p>
+      </div>
     </div>
   </section>
 
@@ -387,6 +512,37 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
     </div>
   </section>
 
+  <!-- ============================ matrix ============================ -->
+  <section id="why" class="wrap">
+    <div class="center" style="max-width:760px;margin:0 auto 30px">
+      <div class="eyebrow" data-i18n="why.eyebrow">Straight talk</div>
+      <h2 data-i18n="why.h2">What is included — and what it never does</h2>
+      <p class="mut" data-i18n="why.sub">No subscription, no custody, no lock-in. The whole terminal is in the repo.</p>
+    </div>
+    <div class="cmp">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th data-i18n="why.col0">Included in the terminal</th>
+            <th data-i18n="why.col1">CryptoAI PRO</th>
+            <th data-i18n="why.col2">Typical paid signal group</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td data-i18n="why.r1">Charts + indicators (EMA, Bollinger, RSI, MACD, ATR, Stochastic)</td><td class="yes">✓</td><td class="no" data-i18n="why.n1">usually hidden from free members</td></tr>
+          <tr><td data-i18n="why.r2">Entry · target · stop for every signal</td><td class="yes">✓</td><td class="no" data-i18n="why.n2">often “VIP only”</td></tr>
+          <tr><td data-i18n="why.r3">Fee-aware backtest you can inspect</td><td class="yes">✓</td><td class="no" data-i18n="why.n3">not published</td></tr>
+          <tr><td data-i18n="why.r4">Paper trading to test the signals yourself</td><td class="yes">✓</td><td class="no" data-i18n="why.n4">rare</td></tr>
+          <tr><td data-i18n="why.r5">Auto-bot with risk limits and a daily-loss stop</td><td class="yes">✓</td><td class="no" data-i18n="why.n5">usually social trading only</td></tr>
+          <tr><td data-i18n="why.r6">Monthly cost</td><td class="yes" data-i18n="why.free">free</td><td class="no" data-i18n="why.n6">often a monthly fee</td></tr>
+          <tr><td data-i18n="why.r7">Who holds your money</td><td class="yes" data-i18n="why.self">you, on your exchange</td><td class="no" data-i18n="why.n7">sometimes a pooled account</td></tr>
+          <tr><td data-i18n="why.r8">Sinhala interface</td><td class="yes">✓</td><td class="no" data-i18n="why.n8">rare</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="fineprint" data-i18n="why.fine">The right-hand column is a general pattern in paid signal channels, not a statement about any specific product or person.</p>
+  </section>
+
   <!-- =========================== safety ============================= -->
   <section class="wrap">
     <div class="safety">
@@ -453,11 +609,61 @@ footer{border-top:1px solid var(--line);padding:34px 0;margin-top:20px;position:
   </div>
 </footer>
 
+<script src="app/ta.js"></script>
 <script>
 /* ============================== i18n ==================================== */
 const STR = {
-  en: {},
+  en: {
+    "nav.demo": "Live demo", "nav.features": "Features", "nav.inside": "Inside the app",
+    "a11y.skip": "Skip to content",
+    "stat.pairs": "markets scanned at once", "stat.indicators": "indicators per signal",
+    "stat.strategies": "bot strategies", "stat.keys": "keys needed to start",
+    "demo.eyebrow": "Live demo · no install", "demo.h2": "Watch the engine read real candles right here",
+    "demo.sub": "This is ta.js — the very same analysis engine that runs inside the APK — scoring live Binance candles in your browser.",
+    "demo.loading": "Fetching candles…", "demo.open": "Run it on your own screens",
+    "demo.disc": "Educational analysis, not investment advice. Past performance does not predict the future.",
+    "demo.live": "Live Binance {tf} candles · analysed in your browser by ta.js",
+    "demo.sample": "Sample candles (no exchange connection) — the engine and the maths are real, the prices are not.",
+    "demo.bt": "Backtest on these candles (0.10% fee/side): {trades} trades · win rate {win}% · net {pnl}% · buy &amp; hold {bh}%",
+    "demo.wait": "wait", "demo.conf": "confidence {c}%",
+    "why.eyebrow": "Straight talk", "why.h2": "What is included — and what it never does",
+    "why.sub": "No subscription, no custody, no lock-in. The whole terminal is in the repo.",
+    "why.col0": "Included in the terminal", "why.col1": "CryptoAI PRO", "why.col2": "Typical paid signal group",
+    "why.r1": "Charts + indicators (EMA, Bollinger, RSI, MACD, ATR, Stochastic)",
+    "why.r2": "Entry · target · stop for every signal", "why.r3": "Fee-aware backtest you can inspect",
+    "why.r4": "Paper trading to test the signals yourself", "why.r5": "Auto-bot with risk limits and a daily-loss stop",
+    "why.r6": "Monthly cost", "why.r7": "Who holds your money", "why.r8": "Sinhala interface",
+    "why.n1": "usually hidden from free members", "why.n2": "often “VIP only”", "why.n3": "not published",
+    "why.n4": "rare", "why.n5": "usually social trading only", "why.n6": "often a monthly fee",
+    "why.n7": "sometimes a pooled account", "why.n8": "rare",
+    "why.free": "free", "why.self": "you, on your exchange",
+    "why.fine": "The right-hand column is a general pattern in paid signal channels, not a statement about any specific product or person.",
+  },
   si: {
+    "nav.demo": "සජීවී demo", "nav.features": "විශේෂාංග", "nav.inside": "App එක ඇතුළේ",
+    "a11y.skip": "කෙලින්ම අන්තර්ගතයට",
+    "stat.pairs": "එකවර scan වන වෙළඳපොල", "stat.indicators": "සංඥාවකට දර්ශක",
+    "stat.strategies": "රොබෝ උපාය", "stat.keys": "පටන් ගන්න ඕන යතුරු",
+    "demo.eyebrow": "සජීවී demo · install නැතුව", "demo.h2": "මෙතනම engine එක සැබෑ කැන්ඩල් කියවන හැටි බලන්න",
+    "demo.sub": "මේ තමයි ta.js — APK එක ඇතුළේ දුවන එකම විශ්ලේෂණ engine එක — ඔබේ browser එකේදීම සජීවී Binance කැන්ඩල් ලකුණු කරනවා.",
+    "demo.loading": "කැන්ඩල් ලබාගනිමින්…", "demo.open": "ඔබේම තිරවල එය run කරන්න",
+    "demo.disc": "අධ්‍යාපනික විශ්ලේෂණයක්, ආයෝජන උපදෙසක් නොවේ. අතීත ප්‍රතිඵල අනාගතය සහතික නොකරයි.",
+    "demo.live": "සජීවී Binance {tf} කැන්ඩල් · ඔබේ browser එකේදීම ta.js එකෙන් විශ්ලේෂණය",
+    "demo.sample": "නියැදි කැන්ඩල් (හුවමාරු සම්බන්ධතාවක් නැත) — engine එක සහ ගණනය සැබෑ, මිල නොවේ.",
+    "demo.bt": "මේ කැන්ඩල් මත backtest (ගාස්තු 0.10%/පැත්ත): වෙළඳාම් {trades} · දිනුම් {win}% · ශුද්ධ {pnl}% · buy &amp; hold {bh}%",
+    "demo.wait": "රැඳී සිටින්න", "demo.conf": "විශ්වාසය {c}%",
+    "why.eyebrow": "කෙළින්ම කියමු", "why.h2": "මොනවද ඇතුළත් — සහ මොනවද කවදාවත් කරන්නේ නැත්තේ",
+    "why.sub": "Subscription නෑ, ඔබේ මුදල් අපි ළඟ තියාගන්නේ නෑ, lock-in නෑ. මුළු ටර්මිනල් එකම repo එකේ.",
+    "why.col0": "ටර්මිනල් එකේ ඇතුළත්", "why.col1": "CryptoAI PRO", "why.col2": "සාමාන්‍ය ගෙවන සංඥා කණ්ඩායමක්",
+    "why.r1": "ප්‍රස්තාර + දර්ශක (EMA, Bollinger, RSI, MACD, ATR, Stochastic)",
+    "why.r2": "හැම සංඥාවකටම ඇතුල්වීම · ඉලක්කය · නැවතුම", "why.r3": "ඔබටම බලන්න පුළුවන් ගාස්තු සහිත backtest",
+    "why.r4": "සංඥා ඔබම පරීක්ෂා කරන්න පුහුණු වෙළඳාම", "why.r5": "අවදානම් සීමා සහ දෛනික පාඩු නැවතුම සහිත auto-රොබෝ",
+    "why.r6": "මාසික වියදම", "why.r7": "ඔබේ මුදල් තියෙන්නේ කා ළඟද", "why.r8": "සිංහල interface එක",
+    "why.n1": "නොමිලේ සාමාජිකයන්ට සාමාන්‍යයෙන් හංගලා", "why.n2": "බොහෝ විට “VIP සඳහා පමණයි”", "why.n3": "ප්‍රකාශ නොකරයි",
+    "why.n4": "කලාතුරකින්", "why.n5": "සාමාන්‍යයෙන් social trading විතරයි", "why.n6": "බොහෝ විට මාසික ගෙවීමක්",
+    "why.n7": "සමහර විට පොදු ගිණුමක්", "why.n8": "කලාතුරකින්",
+    "why.free": "නොමිලේ", "why.self": "ඔබ, ඔබේ හුවමාරුවේ",
+    "why.fine": "දකුණු තීරුව ගෙවන සංඥා කණ්ඩායම්වල සාමාන්‍ය රටාවක් — කිසිම නිශ්චිත නිෂ්පාදනයක් හෝ පුද්ගලයෙක් ගැන ප්‍රකාශයක් නොවේ.",
     "nav.features": "විශේෂාංග", "nav.inside": "App එක ඇතුළේ", "nav.install": "Install", "nav.faq": "ප්‍රශ්න",
     "cta.open": "Web app එක අරින්න", "cta.openWeb": "Web app එක පාවිච්චි කරන්න", "cta.apk": "APK එක බාගන්න (Android)",
     "cta.pwa": "Home screen එකට එක් කරන්න",
@@ -518,7 +724,12 @@ const STR = {
 };
 
 let LANG = "en";
-function t(k) { return (STR[LANG] && STR[LANG][k]) || null; }
+/** Translate a key, with {var} interpolation — same contract as t() in the app. */
+function t(k, vars) {
+  let s = (STR[LANG] && STR[LANG][k]) || null;
+  if (s && vars) Object.keys(vars).forEach((name) => { s = s.replace("{" + name + "}", vars[name]); });
+  return s;
+}
 
 function applyLang(lang, persist) {
   LANG = lang;
@@ -534,7 +745,10 @@ function applyLang(lang, persist) {
   btn.setAttribute("aria-label", lang === "si" ? "Switch to English" : "සිංහලට මාරු වන්න");
   if (persist) { try { localStorage.setItem("cryptoai.web.lang", lang); } catch (e) { } }
 }
-document.getElementById("langBtn").onclick = () => applyLang(LANG === "si" ? "en" : "si", true);
+function refreshDemoText() {
+  if (typeof demoData === "object" && demoData && window.TA) demoPaint(TA.analyze(demoData.candles), demoData.candles, demoData.live);
+}
+document.getElementById("langBtn").onclick = () => { applyLang(LANG === "si" ? "en" : "si", true); refreshDemoText(); };
 try {
   const saved = localStorage.getItem("cryptoai.web.lang");
   const want = saved || ((navigator.language || "").toLowerCase().startsWith("si") ? "si" : "en");
@@ -595,6 +809,259 @@ paintStrip({}, "…");
   g.innerHTML = out;
 })();
 
+/* ========================= hero background canvas ====================== */
+(function heroCanvas() {
+  const cv = document.getElementById("heroCanvas");
+  if (!cv) return;
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce || !cv.getContext) return;
+  const ctx = cv.getContext("2d");
+  let raf = null, phase = 0, visible = true;
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const series = [];
+  let p = 0.5;
+  for (let i = 0; i < 90; i++) {
+    const o = p, c = Math.max(0.08, Math.min(0.92, o + (rnd() - 0.47) * 0.09));
+    series.push({ o, c, h: Math.max(o, c) + rnd() * 0.035, l: Math.min(o, c) - rnd() * 0.035 });
+    p = c;
+  }
+  function size() {
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.max(1, r.width * dpr);
+    cv.height = Math.max(1, r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return r;
+  }
+  function draw() {
+    const r = size();
+    const W = r.width, H = r.height;
+    ctx.clearRect(0, 0, W, H);
+    const n = 34, cw = W / n, off = Math.floor(phase) % series.length;
+    for (let i = 0; i < n; i++) {
+      const c = series[(off + i) % series.length];
+      const x = i * cw + cw / 2 + (phase % 1) * cw;
+      const y = (v) => 40 + (1 - v) * (H - 90);
+      const up = c.c >= c.o;
+      const col = up ? "rgba(14,203,129,.75)" : "rgba(246,70,93,.75)";
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(x, y(c.h)); ctx.lineTo(x, y(c.l)); ctx.stroke();
+      const t = y(Math.max(c.o, c.c)), b = y(Math.min(c.o, c.c));
+      ctx.fillRect(x - cw * 0.28, t, cw * 0.56, Math.max(2, b - t));
+    }
+    // gold trend line over the top
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const c = series[(off + i) % series.length];
+      const x = i * cw + cw / 2, yy = 40 + (1 - (c.o + c.c) / 2) * (H - 90);
+      i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy);
+    }
+    ctx.strokeStyle = "rgba(240,185,11,.9)"; ctx.lineWidth = 2.4; ctx.stroke();
+  }
+  function tick() {
+    if (!visible || document.hidden) { raf = null; return; }
+    phase += 0.02;
+    draw();
+    raf = requestAnimationFrame(tick);
+  }
+  function start() { if (!raf && visible) raf = requestAnimationFrame(tick); }
+  const hero = cv.parentElement;
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((e) => { visible = e[0].isIntersecting; start(); }, { threshold: 0.02 }).observe(hero);
+  }
+  document.addEventListener("visibilitychange", start);
+  window.addEventListener("resize", draw);
+  draw();
+  start();
+})();
+
+/* ============================== live demo ============================== */
+const DEMO_PAIRS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+const DEMO_TFS = ["15m", "1h", "4h", "1d"];
+const TF_MS = { "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000 };
+let demoPair = "BTCUSDT", demoTf = "1h", demoData = null, demoAuto = true, demoBusy = false;
+
+function fmtPx(v) {
+  const a = Math.abs(+v);
+  if (!isFinite(a)) return "—";
+  if (a >= 1000) return (+v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (a >= 1) return (+v).toFixed(a >= 100 ? 2 : 4);
+  return (+v).toPrecision(4);
+}
+function synthCandles(sym, tf, n) {
+  let seed = 0;
+  for (let i = 0; i < sym.length + tf.length; i++) seed = (seed * 31 + (sym + tf).charCodeAt(i)) & 0x7fffffff;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const base = { BTCUSDT: 64000, ETHUSDT: 2480, SOLUSDT: 148 }[sym] || 100;
+  const step = TF_MS[tf] || 3600000, t0 = Math.floor(Date.now() / step) * step - (n - 1) * step;
+  const out = [];
+  let p = base * (1 - (rnd() - 0.45) * 0.1);
+  const vol = 0.012;
+  for (let i = 0; i < n; i++) {
+    const drift = (i / n - 0.5) * 0.003;
+    const o = p, c = Math.max(1e-8, p * (1 + (rnd() - 0.5) * vol + drift));
+    out.push({ t: t0 + i * step, o, h: Math.max(o, c) * (1 + rnd() * 0.004), l: Math.min(o, c) * (1 - rnd() * 0.004), c, v: 500 + rnd() * 2000 });
+    p = c;
+  }
+  return out;
+}
+async function demoFetch(sym, tf) {
+  const url = `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${tf}&limit=200`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const j = await res.json();
+  if (!Array.isArray(j) || j.length < 60) throw new Error("short series");
+  return j.map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }));
+}
+
+function drawDemoChart(candles) {
+  const cv = document.getElementById("demoChart");
+  if (!cv || !cv.getContext) return;
+  const wrap = cv.parentElement;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const W = wrap.clientWidth || 420, H = 250;
+  cv.width = W * dpr; cv.height = H * dpr;
+  cv.style.height = H + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const n = Math.min(90, candles.length);
+  const view = candles.slice(candles.length - n);
+  const closes = view.map((c) => c.c);
+  const padR = 54, padT = 10, padB = 18;
+  let mn = Infinity, mx = -Infinity;
+  view.forEach((c) => { mn = Math.min(mn, c.l); mx = Math.max(mx, c.h); });
+  const e20 = TA ? TA.ema(closes, 20) : null, e50 = TA ? TA.ema(closes, 50) : null;
+  (e20 || []).forEach((v) => { if (v) { mn = Math.min(mn, v); mx = Math.max(mx, v); } });
+  (e50 || []).forEach((v) => { if (v) { mn = Math.min(mn, v); mx = Math.max(mx, v); } });
+  const pad = (mx - mn) * 0.06 || mx * 0.005;
+  mn -= pad; mx += pad;
+  const plotW = W - padR, cw = plotW / n;
+  const X = (i) => i * cw + cw / 2;
+  const Y = (v) => padT + (H - padT - padB) * (1 - (v - mn) / (mx - mn));
+  // grid + axis
+  ctx.font = "10px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  for (let g = 0; g <= 4; g++) {
+    const v = mn + ((mx - mn) * g) / 4, y = Y(v);
+    ctx.strokeStyle = "rgba(31,42,66,.7)"; ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(plotW, y + .5); ctx.stroke();
+    ctx.fillStyle = "#5b6a86"; ctx.fillText(fmtPx(v), plotW + 5, y);
+  }
+  // candles
+  view.forEach((c, i) => {
+    const up = c.c >= c.o;
+    const col = up ? "#0ecb81" : "#f6465d";
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(X(i), Y(c.h)); ctx.lineTo(X(i), Y(c.l)); ctx.stroke();
+    const t = Y(Math.max(c.o, c.c)), b = Y(Math.min(c.o, c.c));
+    ctx.fillRect(X(i) - cw * 0.3, t, cw * 0.6, Math.max(1.2, b - t));
+  });
+  // EMAs
+  [[e20, "#f0b90b"], [e50, "#38bdf8"]].forEach(([ser, col]) => {
+    if (!ser) return;
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < n; i++) {
+      const v = ser[i];
+      if (v == null) continue;
+      started ? ctx.lineTo(X(i), Y(v)) : (ctx.moveTo(X(i), Y(v)), started = true);
+    }
+    ctx.stroke();
+  });
+  // last price tag
+  const last = view[view.length - 1].c;
+  const y = Y(last), up = view[view.length - 1].c >= view[view.length - 1].o;
+  ctx.strokeStyle = up ? "rgba(14,203,129,.65)" : "rgba(246,70,93,.65)";
+  ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = up ? "#0ecb81" : "#f6465d";
+  ctx.fillRect(plotW + 1, y - 8, padR - 2, 16);
+  ctx.fillStyle = "#04140c"; ctx.textAlign = "center";
+  ctx.font = "bold 10px ui-monospace,monospace";
+  ctx.fillText(fmtPx(last), plotW + padR / 2, y);
+}
+
+function demoPaint(rep, candles, live) {
+  const card = document.getElementById("demoVerdict");
+  const verdict = rep.verdict;
+  const cls = verdict.indexOf("BUY") >= 0 ? "buy" : verdict.indexOf("SELL") >= 0 ? "sell" : "neutral";
+  const col = cls === "buy" ? "var(--up)" : cls === "sell" ? "var(--dn)" : "var(--mut)";
+  card.className = "vcard " + cls;
+  const badge = document.getElementById("dvBadge");
+  badge.textContent = verdict === "NEUTRAL" ? (LANG === "si" ? "රැඳී සිටින්න" : "NEUTRAL — WAIT") : (LANG === "si" ? SI_VERDICT[verdict] || verdict : verdict);
+  badge.style.color = col;
+  document.getElementById("dvPair").textContent = demoPair.replace("USDT", "/USDT") + " · " + demoTf + " · " + fmtPx(rep.price);
+  const bar = document.getElementById("dvBar");
+  bar.style.width = rep.confidence + "%"; bar.style.background = col;
+  document.getElementById("dvConf").textContent = (LANG === "si" ? "විශ්වාසය" : "confidence") + " " + rep.confidence + "% · score " + rep.score;
+  document.getElementById("dvReasons").innerHTML = rep.reasons.slice(0, 4)
+    .map((r) => `<li>${(LANG === "si" ? r.si : r.en)}</li>`).join("");
+  const lv = document.getElementById("dvLevels");
+  if (rep.levels) {
+    lv.hidden = false;
+    const L = rep.levels;
+    lv.innerHTML = `
+      <div><span>${LANG === "si" ? "ඇතුල්වීම" : "Entry"}</span><b>${fmtPx(L.entry)}</b></div>
+      <div><span>${LANG === "si" ? "ඉලක්කය" : "Target"}</span><b class="up">${fmtPx(L.tp)}</b></div>
+      <div><span>${LANG === "si" ? "නැවතුම" : "Stop"}</span><b class="dn">${fmtPx(L.sl)}</b></div>`;
+  } else { lv.hidden = true; }
+  const m = rep.metrics;
+  const cells = [
+    ["RSI 14", m.rsi], ["Trend", m.trend], ["ATR %", m.atrPct],
+    ["Bollinger %B", (m.pctB || 0) + "%"], ["Stoch %K", m.stochK], ["Volume ×", m.volRatio],
+  ];
+  document.getElementById("dvMetrics").innerHTML = cells.map(([k, v]) =>
+    `<div><div class="k">${k}</div><div class="v">${v == null ? "—" : v}</div></div>`).join("");
+  const bt = TA.backtest(candles, { minScore: 25, feePct: 0.1 });
+  document.getElementById("dvBacktest").innerHTML = t("demo.bt", {
+    trades: bt.trades, win: bt.winRate, pnl: (bt.pnlPct > 0 ? "+" : "") + bt.pnlPct, bh: bt.buyHoldPct,
+  });
+  const src = document.getElementById("demoSrc");
+  src.className = "srcnote" + (live ? "" : " warn");
+  src.textContent = live ? t("demo.live", { tf: demoTf }) : t("demo.sample");
+
+  // mirror everything into the hero phone mockup
+  const pv = document.getElementById("pvBadge");
+  if (pv) {
+    pv.textContent = verdict === "NEUTRAL" ? (LANG === "si" ? "රැඳී සිටින්න" : "WAIT") : (LANG === "si" ? SI_VERDICT[verdict] || verdict : verdict);
+    pv.style.color = col;
+    document.getElementById("pvPair").textContent = demoPair.replace("USDT", "/USDT") + " · " + demoTf;
+    document.getElementById("pvConf").textContent = (LANG === "si" ? "විශ්වාසය" : "confidence") + " " + rep.confidence + "%";
+    document.getElementById("pvBar").style.width = rep.confidence + "%";
+    document.getElementById("pvBar").style.background = col;
+    const L = rep.levels;
+    document.getElementById("pvEntry").textContent = fmtPx(L ? L.entry : rep.price);
+    document.getElementById("pvTp").textContent = L ? fmtPx(L.tp) : "—";
+    document.getElementById("pvSl").textContent = L ? fmtPx(L.sl) : "—";
+  }
+}
+const SI_VERDICT = { "STRONG BUY": "ශක්තිමත් මිලදී ගැනීම", "BUY": "මිලදී ගන්න", "SELL": "විකුණන්න", "STRONG SELL": "ශක්තිමත් විකුණුම්" };
+
+async function demoLoad() {
+  if (demoBusy) return;
+  demoBusy = true;
+  const src = document.getElementById("demoSrc");
+  if (src && !demoData) src.textContent = t("demo.loading");
+  let candles = null, live = true;
+  try { candles = await demoFetch(demoPair, demoTf); }
+  catch (e) { candles = synthCandles(demoPair, demoTf, 200); live = false; }
+  demoData = { pair: demoPair, tf: demoTf, candles, live };
+  if (!TA) { demoBusy = false; return; }
+  const rep = TA.analyze(candles);
+  drawDemoChart(candles);
+  demoPaint(rep, candles, live);
+  demoBusy = false;
+}
+
+function paintDemoChips() {
+  const pairs = document.getElementById("demoPairs");
+  const tfs = document.getElementById("demoTfs");
+  if (!pairs || !tfs) return;
+  pairs.innerHTML = DEMO_PAIRS.map((p) => `<button class="chip ${p === demoPair ? "on" : ""}" data-dpair="${p}">${p.replace("USDT", "/USDT")}</button>`).join("");
+  tfs.innerHTML = DEMO_TFS.map((x) => `<button class="chip ${x === demoTf ? "on" : ""}" data-dtf="${x}">${x}</button>`).join("");
+  pairs.querySelectorAll("[data-dpair]").forEach((b) => b.onclick = () => { demoPair = b.dataset.dpair; demoAuto = false; paintDemoChips(); demoLoad(); });
+  tfs.querySelectorAll("[data-dtf]").forEach((b) => b.onclick = () => { demoTf = b.dataset.dtf; demoAuto = false; paintDemoChips(); demoLoad(); });
+}
+
 /* =============================== reveal =============================== */
 if ("IntersectionObserver" in window) {
   const io = new IntersectionObserver((entries) => {
@@ -630,6 +1097,42 @@ pwaBtns.forEach((b) => b && (b.onclick = async () => {
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => { }));
 }
+
+/* ---------------------------- live demo boot --------------------------- */
+paintDemoChips();
+demoLoad().then(refreshDemoText);
+setInterval(() => {                                  // rotate markets until the visitor picks one
+  if (!demoAuto || document.hidden) return;
+  const i = DEMO_PAIRS.indexOf(demoPair);
+  demoPair = DEMO_PAIRS[(i + 1) % DEMO_PAIRS.length];
+  paintDemoChips();
+  demoLoad();
+}, 14000);
+setInterval(() => { if (!document.hidden && demoAuto) demoLoad(); }, 60000);
+if (typeof applyLang === "function") { /* keep verdict text in sync with the language toggle */ }
+
+/* ---------------------------- stats count-up --------------------------- */
+(function countUp() {
+  const nodes = [...document.querySelectorAll("[data-count]")];
+  if (!nodes.length) return;
+  const run = (n) => {
+    const target = parseInt(n.dataset.count, 10) || 0;
+    if (!target) { n.textContent = "0"; return; }
+    const t0 = performance.now(), dur = 900;
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur);
+      n.textContent = Math.round(target * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+  if ("IntersectionObserver" in window) {
+    const io2 = new IntersectionObserver((es) => es.forEach((e) => {
+      if (e.isIntersecting) { run(e.target); io2.unobserve(e.target); }
+    }), { threshold: 0.4 });
+    nodes.forEach((n) => io2.observe(n));
+  } else nodes.forEach(run);
+})();
 </script>
 </body>
 </html>

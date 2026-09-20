@@ -127,6 +127,18 @@ const STR = {
     "bt.few": "Not enough history to backtest.",
     "bt.disclaimer": "Past performance does not predict the future.",
     "live.unsupported": "Live trading is only available in the Android app.",
+    "scan.run": "🔎 Scan all signals", "scan.title": "Signal scan", "scan.stop": "Stop",
+    "scan.running": "Scanning {done}/{total}…", "scan.result": "{n} pairs on {tf} · {strong} strong",
+    "scan.empty": "Run a scan to rank every market by signal strength.",
+    "mtf.title": "Multi-timeframe", "mtf.refresh": "Refresh", "mtf.consensus": "Consensus",
+    "mtf.note": "When several timeframes agree, the setup is stronger than a single reading.",
+    "calc.title": "Position size calculator", "calc.account": "Account (USDT)", "calc.risk": "Risk %",
+    "calc.stop": "Stop price", "calc.size": "Position size", "calc.notional": "Notional", "calc.riskAmt": "Risk",
+    "calc.use": "Use this size in the order",
+    "calc.badStop": "The stop must be below the entry price for a long (above it for a short).",
+    "stats.title": "Paper statistics", "stats.trades": "Closed trades", "stats.win": "Win rate",
+    "stats.expect": "Expectancy / trade", "stats.pf": "Profit factor", "stats.equity": "Equity curve (paper)",
+    "stats.none": "Close a few paper trades to see statistics.",
   },
   si: {
     "nav.markets": "වෙළඳපොල", "nav.chart": "ප්‍රස්තාරය", "nav.signals": "සංඥා", "nav.trade": "වෙළඳාම", "nav.bot": "රොබෝ",
@@ -202,6 +214,18 @@ const STR = {
     "bt.few": "පසුපරීක්ෂාවට ප්‍රමාණවත් ඉතිහාසයක් නැත.",
     "bt.disclaimer": "අතීත ප්‍රතිඵල අනාගතය සහතික නොකරයි.",
     "live.unsupported": "සැබෑ වෙළඳාම Android app එකේදී පමණි.",
+    "scan.run": "🔎 හැම සංඥාවම scan කරන්න", "scan.title": "සංඥා scan", "scan.stop": "නවත්වන්න",
+    "scan.running": "Scan වෙමින් {done}/{total}…", "scan.result": "{tf} මත කොයින් {n}ක් · ශක්තිමත් {strong}ක්",
+    "scan.empty": "හැම වෙළඳපොලක්ම සංඥා ශක්තිය අනුව ශ්‍රේණිගත කරන්න scan එකක් run කරන්න.",
+    "mtf.title": "කාල රාමු කිහිපයක්", "mtf.refresh": "යාවත්කාලීන", "mtf.consensus": "එකඟතාව",
+    "mtf.note": "කාල රාමු කිහිපයක් එකඟ වන විට, තනි කියවීමකට වඩා එම සැකසුම ශක්තිමත්.",
+    "calc.title": "ස්ථාන ප්‍රමාණ ගණකය", "calc.account": "ගිණුම (USDT)", "calc.risk": "අවදානම %",
+    "calc.stop": "නැවතුම් මිල", "calc.size": "ප්‍රමාණය", "calc.notional": "වටිනාකම", "calc.riskAmt": "අවදානම",
+    "calc.use": "මේ ප්‍රමාණය ඇණවුමට දාන්න",
+    "calc.badStop": "Long එකකට නැවතුම් මිල ඇතුල් මිලට පහළින් විය යුතුයි (short එකකට ඉහළින්).",
+    "stats.title": "පුහුණු සංඛ්‍යාලේඛන", "stats.trades": "වසා දැමූ වෙළඳාම්", "stats.win": "දිනුම් %",
+    "stats.expect": "එක් වෙළඳාමක බලාපොරොත්තුව", "stats.pf": "ලාභ සාධකය", "stats.equity": "මුළු වටිනාකම් වක්‍රය (පුහුණු)",
+    "stats.none": "සංඛ්‍යාලේශන බලන්න paper වෙළඳාම් කිහිපයක් වසන්න.",
   },
 };
 function t(key, vars) {
@@ -275,7 +299,7 @@ function load() {
   } catch (e) { console.warn("load", e); }
 }
 function freshPaper() {
-  return { bal: 10000, positions: [], orders: [], history: [], day: dayKey(), dayPnl: 0, seq: 1 };
+  return { bal: 10000, positions: [], orders: [], history: [], day: dayKey(), dayPnl: 0, seq: 1, eq: [{ t: now(), v: 10000 }] };
 }
 function botCfg() {
   return state.botCfg || (state.botCfg = {
@@ -512,7 +536,7 @@ function publishTicker(sym, tk) {
   if (row) paintRow(row, sym);
   if (state.tab === "trade" && (!prev || now() - (prev.painted || 0) > 900)) {
     tk.painted = now();
-    paintPositions(); paintHistory(); updateOrderEst(); paintBalancesThrottled();
+    paintPositions(); paintHistory(); paintStats(); updateOrderEst(); paintBalancesThrottled();
   }
   checkAlerts(sym, tk.last);
   onPrice(sym, tk.last);
@@ -1110,6 +1134,7 @@ function paintSignals() {
     card.style.display = "none";
   }
   paintBotStats();
+  if (state.tab === "trade") { $("calcStop").value = ""; paintCalc(); }
 }
 
 /* ============================================================================
@@ -1208,9 +1233,10 @@ function switchTab(name) {
   document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("main").scrollTop = 0;
   if (name === "chart") { paintChartHeader(); requestAnimationFrame(renderChart); }
-  if (name === "markets") paintMarkets();
-  if (name === "signals") paintSignals();
-  if (name === "trade") { paintTrade(); }
+  /* keep the calculator's auto-filled stop in sync with the signal plan */
+  if (name === "markets") { paintMarkets(); scanInfo(); }
+  if (name === "signals") { paintSignals(); paintMTF(); }
+  if (name === "trade") { if (!lastReport) paintSignals(); paintTrade(); paintCalc(); paintStats(); }
   if (name === "bot") paintBot();
 }
 
@@ -1220,7 +1246,11 @@ function renderAll() {
   paintChartHeader();
   paintSignals();
   paintTrade();
+  paintCalc();
+  paintStats();
   paintBot();
+  paintScan();
+  scanInfo();
   setConn(state.dataMode === "live" ? "live" : state.dataMode === "demo" ? "demo" : "off");
 }
 
@@ -1275,6 +1305,9 @@ function closePaper(posId, price, reason) {
   const pnl = pos.openCash + closeCash;
   p.positions.splice(i, 1);
   p.dayPnl += pnl;
+  if (!p.eq) p.eq = [];
+  p.eq.push({ t: now(), v: paperEquity() });
+  if (p.eq.length > 300) p.eq.shift();
   p.history.unshift({ ts: now(), sym: pos.sym, side: pos.dir > 0 ? "SELL" : "BUY-BACK", qty: pos.qty, price, src: pos.src, pnl, reason });
   const bot = state.bot;
   if (bot && pos.src === "bot") {
@@ -2044,6 +2077,21 @@ function bindUI() {
     state.alerts.push({ id: uid(), sym: state.sym, price, dir: $("alertWhen").value });
     save(); paintAlerts(); paintAlertBadge(); closeSheet("alertModal"); toast(t("saved"), "ok");
   };
+  $("scanBtn").onclick = runScan;
+  $("scanStop").onclick = () => { scanState().running = false; paintScan(); scanInfo(); };
+  $("mtfBtn").onclick = () => paintMTF();
+  ["calcAcct", "calcRisk", "calcStop"].forEach((id) => $(id).oninput = paintCalc);
+  $("calcUse").onclick = () => {
+    if (!calcQty) { toast(t("calc.badStop"), "bad"); return; }
+    $("ordAmt").value = calcQty.toFixed(6);
+    const isLimit = document.querySelector("#typeSeg button.on").dataset.t === "limit";
+    if (isLimit) $("ordPrice").value = (state.tickers[state.sym] || {}).last || "";
+    document.querySelector('#typeSeg [data-t="market"]').click();
+    updateOrderEst();
+    toast(t("calc.use") + " → " + fmtQty(calcQty), "ok");
+    haptic(30);
+    if ($("ordAmt").scrollIntoView) $("ordAmt").scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   $("aiBtn").onclick = aiExplain;
   $("btBtn").onclick = runBacktest;
 
@@ -2191,3 +2239,208 @@ function init() {
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
+
+/* ============================================================================
+ * SIGNAL SCANNER — ranks every market by signal strength on one timeframe
+ * ========================================================================== */
+function scanState() { return state.scan || (state.scan = { rows: [], done: 0, total: 0, running: false, tf: "", at: 0 }); }
+
+function scanInfo() {
+  const s = scanState(), box = $("scanInfo");
+  if (!box) return;
+  if (s.running) { box.textContent = t("scan.running", { done: s.done, total: s.total }); return; }
+  if (!s.rows.length) { box.textContent = ""; return; }
+  const strong = s.rows.filter((r) => Math.abs(r.score) >= 45).length;
+  box.textContent = t("scan.result", { n: s.rows.length, tf: s.tf, strong });
+}
+
+async function runScan() {
+  const s = scanState();
+  if (s.running || !TA) return;
+  s.running = true; s.done = 0; s.rows = []; s.tf = state.tf;
+  const list = WATCHLIST.slice();
+  s.total = list.length;
+  openSheet("scanModal");
+  paintScan();
+  for (const sym of list) {
+    if (!s.running) break;
+    try {
+      const k = state.dataMode === "demo" ? demoCandles(sym, s.tf, 150) : await fetchKlinesSmart(sym, s.tf, 150);
+      const rep = TA.analyze(k);
+      if (rep.ok) s.rows.push({ sym, verdict: rep.verdict, score: rep.score, conf: rep.confidence, price: rep.price, conflict: !!rep.conflict });
+    } catch (e) { /* skip symbol */ }
+    s.done++;
+    if (s.done % 4 === 0 || s.done === s.total) paintScan();
+    if (state.dataMode !== "demo") await sleep(90);      // be kind to the exchange rate limits
+  }
+  s.running = false; s.at = now();
+  paintScan(); scanInfo();
+  const strong = s.rows.filter((r) => Math.abs(r.score) >= 45).length;
+  if (strong) toast(t("scan.result", { n: s.rows.length, tf: s.tf, strong }), "ok", 3600);
+  haptic(40);
+}
+
+function paintScan() {
+  const s = scanState();
+  const bar = $("scanBar"), sum = $("scanSummary"), stop = $("scanStop"), list = $("scanList");
+  if (!bar) return;
+  bar.style.width = (s.total ? (s.done / s.total) * 100 : 0) + "%";
+  stop.disabled = !s.running;
+  const rows = s.rows.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+  sum.innerHTML = s.running
+    ? '<span class="spinner"></span> ' + esc(t("scan.running", { done: s.done, total: s.total }))
+    : rows.length
+      ? esc(t("scan.result", { n: rows.length, tf: s.tf, strong: rows.filter((r) => Math.abs(r.score) >= 45).length }))
+      : esc(t("scan.empty"));
+  list.innerHTML = rows.map((r) => {
+    const cls = r.verdict.indexOf("BUY") >= 0 ? "up" : r.verdict.indexOf("SELL") >= 0 ? "dn" : "mut";
+    const w = clamp(Math.abs(r.score), 2, 100);
+    return `<div class="mrow" data-scan="${esc(r.sym)}">
+      <div class="sym"><b>${esc(r.sym.replace("USDT", "/USDT"))}</b><span class="mono">${fmtPrice(r.price)}</span></div>
+      <div style="flex:1;min-width:60px">
+        <div class="${cls} b small">${esc(vLabel(r.verdict))} ${r.conflict ? "⚠" : ""}</div>
+        <div class="gauge" style="margin-top:5px"><i style="width:${w}%;background:${cls === "up" ? "var(--up)" : cls === "dn" ? "var(--dn)" : "var(--dim)"}"></i></div>
+      </div>
+      <div class="mono small ${cls}" style="width:64px;text-align:right">${r.score > 0 ? "+" : ""}${r.score}
+        <div class="tiny dim">${r.conf}%</div></div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll("[data-scan]").forEach((n) => n.onclick = () => {
+    state.sym = n.dataset.scan; save();
+    closeSheet("scanModal");
+    switchTab("chart"); loadChart(); paintChartHeader(); paintSignals(); paintTrade();
+  });
+}
+
+/* ============================================================================
+ * MULTI-TIMEFRAME CONSENSUS
+ * ========================================================================== */
+let mtfToken = 0;
+async function paintMTF() {
+  const box = $("mtfRows");
+  if (!box || !TA) return;
+  const tfs = ["5m", "15m", "1h", "4h"];
+  const sym = state.sym;
+  const token = ++mtfToken;
+  box.innerHTML = tfs.map((tf) => `<div class="row between" data-mtf="${tf}" style="padding:8px 0;border-bottom:1px dashed rgba(31,42,66,.8)">
+      <span class="b">${tf}</span>
+      <span class="small mut" data-mtfv="${tf}"><span class="spinner"></span></span>
+    </div>`).join("");
+  box.querySelectorAll("[data-mtf]").forEach((r) => r.onclick = () => {
+    state.tf = r.dataset.mtf; save();
+    document.querySelectorAll("#tfChips [data-tf]").forEach((x) => x.classList.toggle("on", x.dataset.tf === state.tf));
+    loadChart(); paintSignals(); paintMTF();
+  });
+  let buy = 0, sell = 0, done = 0;
+  for (const tf of tfs) {
+    if (token !== mtfToken || sym !== state.sym) return;     // symbol/timeframe changed mid-flight
+    try {
+      const k = state.dataMode === "demo" ? demoCandles(sym, tf, 200) : await fetchKlinesSmart(sym, tf, 200);
+      const rep = TA.analyze(k);
+      if (rep.verdict.indexOf("BUY") >= 0) buy++;
+      else if (rep.verdict.indexOf("SELL") >= 0) sell++;
+      const node = box.querySelector('[data-mtfv="' + tf + '"]');
+      if (node) {
+        const cls = rep.verdict.indexOf("BUY") >= 0 ? "up" : rep.verdict.indexOf("SELL") >= 0 ? "dn" : "mut";
+        node.innerHTML = `<span class="${cls} b">${esc(vLabel(rep.verdict))}</span>
+          <span class="dim">${rep.score > 0 ? "+" : ""}${rep.score} · ${rep.confidence}%</span>`;
+      }
+    } catch (e) {
+      const node = box.querySelector('[data-mtfv="' + tf + '"]');
+      if (node) node.textContent = "—";
+    }
+    done++;
+  }
+  const note = $("mtfNote");
+  if (!note || token !== mtfToken) return;
+  const cons = buy > sell ? t("VERDICT.BUY") : sell > buy ? t("VERDICT.SELL") : t("VERDICT.NEUTRAL");
+  const cls = buy > sell ? "up" : sell > buy ? "dn" : "mut";
+  note.innerHTML = `<span class="${cls} b">${esc(t("mtf.consensus"))}: ${esc(cons)} · ${Math.max(buy, sell)}/${done}</span><br>${esc(t("mtf.note"))}`;
+}
+
+/* ============================================================================
+ * RISK-BASED POSITION SIZE + PAPER STATISTICS
+ * ========================================================================== */
+let calcQty = 0;
+function paintCalc() {
+  if (!TA) return;
+  if (!lastReport && state.klines && state.klines.length > 30) lastReport = TA.analyze(state.klines);
+  const tk = state.tickers[state.sym] || {};
+  const entry = tk.last || (lastReport && lastReport.price) || 0;
+  const acct = $("calcAcct");
+  if (!acct.value) acct.value = Math.round((state.settings.liveMode === "live" ? paper().bal : paperEquity()) * 100) / 100;
+  const stop = $("calcStop");
+  if (!stop.value) {
+    // signal plan if there is one, otherwise the same 1.3 × ATR stop the engine uses
+    const auto = (lastReport && lastReport.levels && lastReport.levels.sl) ||
+      (lastReport && lastReport.metrics && lastReport.metrics.atr ? lastReport.price - 1.3 * lastReport.metrics.atr : null);
+    if (auto && auto > 0) stop.value = auto.toFixed(6);
+  }
+  const account = parseFloat(acct.value) || 0;
+  const riskPct = parseFloat($("calcRisk").value) || 0;
+  const stopPrice = parseFloat(stop.value) || 0;
+  const riskUsd = (account * riskPct) / 100;
+  const perUnit = Math.abs(entry - stopPrice);
+  calcQty = perUnit > 0 && riskUsd > 0 ? riskUsd / perUnit : 0;
+  $("calcSize").textContent = calcQty ? fmtQty(calcQty) : "—";
+  $("calcNotional").textContent = calcQty ? fmtUsd(calcQty * entry) : "—";
+  $("calcRiskAmt").textContent = riskUsd ? fmtUsd(riskUsd) : "—";
+  $("calcNote").textContent = calcQty
+    ? (state.settings.lang === "si"
+      ? `මිල ${fmtPrice(entry)} ට ගත්තොත්, ${fmtPrice(stopPrice)} ට නැවතුම් වුණොත් ඔබේ පාඩුව ≈ ${fmtUsd(riskUsd)}.`
+      : `If you enter at ${fmtPrice(entry)} and stop at ${fmtPrice(stopPrice)}, your loss is about ${fmtUsd(riskUsd)}.`)
+    : (entry && stopPrice ? t("calc.badStop") : t("sig.none"));
+}
+
+function paintStats() {
+  const p = paper();
+  const closed = p.history.filter((h) => h.pnl != null);
+  const wins = closed.filter((h) => h.pnl > 0);
+  const losses = closed.filter((h) => h.pnl <= 0);
+  const gp = wins.reduce((s, h) => s + h.pnl, 0);
+  const gl = Math.abs(losses.reduce((s, h) => s + h.pnl, 0));
+  const pf = gl > 0 ? gp / gl : (gp > 0 ? Infinity : 0);
+  const expectancy = closed.length ? closed.reduce((s, h) => s + h.pnl, 0) / closed.length : 0;
+  const cells = [
+    [t("stats.trades"), closed.length, ""],
+    [t("stats.win"), closed.length ? Math.round((wins.length / closed.length) * 100) + "%" : "—", wins.length >= losses.length ? "up" : "dn"],
+    [t("stats.expect"), closed.length ? fmtUsd(expectancy) : "—", expectancy >= 0 ? "up" : "dn"],
+    [t("stats.pf"), closed.length ? (pf === Infinity ? "∞" : pf.toFixed(2)) : "—", pf >= 1 ? "up" : "dn"],
+  ];
+  $("statsBody").innerHTML = cells.map(([k, v, c]) =>
+    `<div class="metric"><div class="k">${esc(k)}</div><div class="v ${c}">${v}</div></div>`).join("");
+  $("statsNote").textContent = closed.length
+    ? `${wins.length}W / ${losses.length}L · ${fmtUsd(p.dayPnl)} today`
+    : t("stats.none");
+  // equity curve
+  const cv = $("eqChart");
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 300;
+  cv.width = w * dpr; cv.height = 70 * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, 70);
+  const eq = (p.eq && p.eq.length ? p.eq : [{ t: now(), v: 10000 }]).slice(-120);
+  if (eq.length < 2) {
+    ctx.fillStyle = "#5b6a86"; ctx.font = "11px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(t("stats.none"), w / 2, 36);
+    return;
+  }
+  const mn = Math.min.apply(null, eq.map((x) => x.v)), mx = Math.max.apply(null, eq.map((x) => x.v));
+  const rx = mx - mn || 1;
+  const X = (i) => 6 + (i / (eq.length - 1)) * (w - 12);
+  const Y = (v) => 60 - ((v - mn) / rx) * 50;
+  ctx.beginPath();
+  eq.forEach((x, i) => (i ? ctx.lineTo(X(i), Y(x.v)) : ctx.moveTo(X(i), Y(x.v))));
+  const up = eq[eq.length - 1].v >= eq[0].v;
+  ctx.strokeStyle = up ? "#0ecb81" : "#f6465d"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.lineTo(X(eq.length - 1), 70); ctx.lineTo(X(0), 70); ctx.closePath();
+  const g = ctx.createLinearGradient(0, 0, 0, 70);
+  g.addColorStop(0, up ? "rgba(14,203,129,.3)" : "rgba(246,70,93,.3)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fill();
+  ctx.fillStyle = "#5b6a86"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
+  ctx.fillText(t("stats.equity"), 8, 12);
+  ctx.textAlign = "right";
+  ctx.fillText(fmtUsd(eq[eq.length - 1].v), w - 8, 12);
+}
