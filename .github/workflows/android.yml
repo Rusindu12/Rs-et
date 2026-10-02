@@ -76,3 +76,21 @@ jobs:
                 --notes "Auto-built from main branch. Debug-signed, installable. Commit: ${SHA}"
           gh release upload apk-latest /tmp/RS-AI.apk --repo "${REPO}" --clobber
           echo "APK is live at: https://github.com/${REPO}/releases/tag/apk-latest"
+
+      - name: Mirror APK to apk-builds branch (direct file channel)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          APK=$(ls android-app/app/build/outputs/apk/debug/*.apk | head -1)
+          echo "Mirroring $APK ($(du -h "$APK" | cut -f1))"
+          rm -rf /tmp/apk-branch && mkdir -p /tmp/apk-branch
+          cp "$APK" /tmp/apk-branch/RS-AI.apk
+          cd /tmp/apk-branch
+          git init -q -b apk-builds
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add RS-AI.apk
+          git commit -qm "RS-AI.apk built from ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" apk-builds
+          echo "APK mirrored to: https://github.com/${REPO}/tree/apk-builds"
