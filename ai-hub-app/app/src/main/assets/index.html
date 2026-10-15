@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#0B0F1A">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>RS AI Hub — All-in-One AI</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ═══════ HEADER ═══════ -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="logo">✦</div>
+      <span data-i="appName">RS AI Hub</span>
+    </div>
+    <div class="header-actions">
+      <button id="langToggle" title="Language">සිංහල</button>
+      <button id="themeToggle" title="Theme"><!-- filled by JS --></button>
+    </div>
+  </header>
+
+  <!-- ═══════ MAIN CONTENT ═══════ -->
+  <div class="main">
+
+    <!-- ─── HOME ─── -->
+    <section id="view-home" class="view active">
+      <div class="home-greeting">
+        <h2 id="homeGreet">Hello! How can I help you today?</h2>
+        <p data-i="tagline">All-in-One AI · Free · No key needed</p>
+      </div>
+
+      <div class="home-ask">
+        <input type="text" id="homeAskInput" data-ph="askAnything" placeholder="Ask anything…">
+        <button id="homeAskBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+
+      <h3 style="margin-bottom:12px;font-size:0.82rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em" data-i="quickActions">Quick Actions</h3>
+      <div class="quick-grid">
+        <div class="quick-item" data-action="chat">
+          <div class="qi-icon">💬</div>
+          <div class="qi-label" data-i="navChat">Chat</div>
+        </div>
+        <div class="quick-item" data-action="imagine">
+          <div class="qi-icon">🎨</div>
+          <div class="qi-label" data-i="navImagine">Imagine</div>
+        </div>
+        <div class="quick-item" data-action="translate">
+          <div class="qi-icon">🌍</div>
+          <div class="qi-label" data-i="toolTranslate">Translate</div>
+        </div>
+        <div class="quick-item" data-action="summarize">
+          <div class="qi-icon">📝</div>
+          <div class="qi-label" data-i="toolSummarize">Summarize</div>
+        </div>
+        <div class="quick-item" data-action="grammar">
+          <div class="qi-icon">✅</div>
+          <div class="qi-label" data-i="toolGrammar">Grammar Fix</div>
+        </div>
+        <div class="quick-item" data-action="email">
+          <div class="qi-icon">📧</div>
+          <div class="qi-label" data-i="toolEmail">Email Writer</div>
+        </div>
+        <div class="quick-item" data-action="code">
+          <div class="qi-icon">💻</div>
+          <div class="qi-label" data-i="toolCode">Code Helper</div>
+        </div>
+        <div class="quick-item" data-action="homework">
+          <div class="qi-icon">📖</div>
+          <div class="qi-label" data-i="toolHomework">Homework Help</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── CHAT ─── -->
+    <section id="view-chat" class="view">
+      <!-- conversation drawer (slide-in sidebar) -->
+      <div id="convOverlay" class="conv-overlay"></div>
+      <aside id="convDrawer" class="conv-drawer">
+        <div class="conv-header">
+          <span style="font-weight:600;font-size:0.95rem" data-i="conversations">Conversations</span>
+          <button id="newConvBtn" class="btn btn-sm btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        <div id="convList" class="conv-list"></div>
+      </aside>
+
+      <div class="chat-layout" style="height:100%">
+        <!-- chat header bar -->
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--glass-border);flex-shrink:0;">
+          <button id="menuBtn" class="btn-icon" style="width:32px;height:32px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <span style="font-weight:600;font-size:0.92rem;flex:1" data-i="navChat">Chat</span>
+        </div>
+
+        <!-- persona selector -->
+        <div id="personaBar" class="persona-bar"></div>
+
+        <!-- messages area -->
+        <div id="messages" class="messages" style="flex:1;overflow-y:auto"></div>
+
+        <!-- typing indicator -->
+        <div id="typingIndicator" class="typing-indicator">
+          <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+        </div>
+
+        <!-- composer -->
+        <div class="composer">
+          <button id="attachBtn" class="btn-icon" style="width:36px;height:36px" data-title="attachImage">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          </button>
+          <textarea id="chatInput" data-ph="typeMessage" placeholder="Type a message…" rows="1"></textarea>
+          <div class="composer-actions">
+            <button id="voiceBtn" class="btn-icon" style="width:36px;height:36px" data-title="voiceInput">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+            </button>
+            <button id="sendBtn" class="send-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </div>
+        <!-- hidden file input for image attach -->
+        <input type="file" id="fileInput" accept="image/*" style="display:none">
+      </div>
+    </section>
+
+    <!-- ─── IMAGINE ─── -->
+    <section id="view-imagine" class="view">
+      <h2 style="font-size:1.2rem;margin-bottom:4px" data-i="imagineTitle">Imagine</h2>
+      <p style="color:var(--text3);font-size:0.85rem;margin-bottom:16px" data-i="imagineDesc">Generate AI images from text</p>
+
+      <div class="imagine-form">
+        <textarea id="imaginePrompt" class="textarea" data-ph="imaginePrompt" placeholder="Describe the image you want…" rows="3"></textarea>
+
+        <div class="imagine-options">
+          <div class="opt-group">
+            <label data-i="model">Model</label>
+            <select id="imagineModel" class="select" style="width:140px">
+              <option value="flux">Flux (quality)</option>
+              <option value="turbo">Turbo (fast)</option>
+              <option value="flux-realism">Flux Realism</option>
+              <option value="flux-anime">Flux Anime</option>
+              <option value="gptimage">GPT Image</option>
+            </select>
+          </div>
+          <div class="opt-group">
+            <label data-i="aspectRatio">Aspect ratio</label>
+            <select id="imagineRatio" class="select" style="width:110px">
+              <option value="1:1">1:1</option>
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+            </select>
+          </div>
+          <div class="opt-group">
+            <label data-i="seed">Seed</label>
+            <input type="number" id="imagineSeed" class="input" data-ph="seedAuto" placeholder="Auto" style="width:90px">
+          </div>
+          <div class="opt-group" style="justify-content:flex-end">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="imagineEnhance" checked style="accent-color:var(--accent)">
+              <span data-i="enhance">Enhance prompt</span>
+            </label>
+          </div>
+        </div>
+
+        <button id="imagineGenBtn" class="btn btn-primary" style="align-self:flex-start">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span data-i="generate">Generate</span>
+        </button>
+      </div>
+
+      <!-- result -->
+      <div id="imagineResult" class="imagine-result" style="min-height:200px">
+        <div class="empty-state" style="width:100%"><div class="es-icon">🎨</div><p data-i="imagineDesc">Generate AI images from text</p></div>
+      </div>
+
+      <!-- gallery -->
+      <h3 style="font-size:0.82rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 10px" data-i="gallery">Gallery</h3>
+      <div id="galleryGrid" class="gallery-grid"></div>
+    </section>
+
+    <!-- ─── TOOLS ─── -->
+    <section id="view-tools" class="view">
+      <h2 style="font-size:1.2rem;margin-bottom:16px" data-i="toolsTitle">AI Tools</h2>
+
+      <!-- tool grid -->
+      <div id="toolsGrid" class="tools-grid">
+        <div class="tool-card card" data-tool="translate">
+          <div class="tc-icon">🌍</div>
+          <div class="tc-name" data-i="toolTranslate">Translate</div>
+          <div class="tc-desc" data-i="toolTranslateDesc">Translate between languages</div>
+        </div>
+        <div class="tool-card card" data-tool="summarize">
+          <div class="tc-icon">📝</div>
+          <div class="tc-name" data-i="toolSummarize">Summarize</div>
+          <div class="tc-desc" data-i="toolSummarizeDesc">Shorten long text into key points</div>
+        </div>
+        <div class="tool-card card" data-tool="rewrite">
+          <div class="tc-icon">✏️</div>
+          <div class="tc-name" data-i="toolRewrite">Rewrite</div>
+          <div class="tc-desc" data-i="toolRewriteDesc">Improve text clarity &amp; style</div>
+        </div>
+        <div class="tool-card card" data-tool="grammar">
+          <div class="tc-icon">✅</div>
+          <div class="tc-name" data-i="toolGrammar">Grammar Fix</div>
+          <div class="tc-desc" data-i="toolGrammarDesc">Fix spelling &amp; grammar errors</div>
+        </div>
+        <div class="tool-card card" data-tool="email">
+          <div class="tc-icon">📧</div>
+          <div class="tc-name" data-i="toolEmail">Email Writer</div>
+          <div class="tc-desc" data-i="toolEmailDesc">Draft professional emails</div>
+        </div>
+        <div class="tool-card card" data-tool="code">
+          <div class="tc-icon">💻</div>
+          <div class="tc-name" data-i="toolCode">Code Helper</div>
+          <div class="tc-desc" data-i="toolCodeDesc">Generate, explain &amp; debug code</div>
+        </div>
+        <div class="tool-card card" data-tool="homework">
+          <div class="tc-icon">📖</div>
+          <div class="tc-name" data-i="toolHomework">Homework Help</div>
+          <div class="tc-desc" data-i="toolHomeworkDesc">Step-by-step explanations</div>
+        </div>
+        <div class="tool-card card" data-tool="study">
+          <div class="tc-icon">📋</div>
+          <div class="tc-name" data-i="toolStudy">Study Notes</div>
+          <div class="tc-desc" data-i="toolStudyDesc">Summarize topics for revision</div>
+        </div>
+        <div class="tool-card card" data-tool="story">
+          <div class="tc-icon">📖</div>
+          <div class="tc-name" data-i="toolStory">Story &amp; Poem</div>
+          <div class="tc-desc" data-i="toolStoryDesc">Creative stories &amp; poetry</div>
+        </div>
+      </div>
+
+      <!-- tool workspace (shown when a tool is selected) -->
+      <div id="toolWorkspace" class="tool-workspace">
+        <div id="toolBack" class="tw-back" style="cursor:pointer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          <span data-i="toolsTitle">AI Tools</span>
+        </div>
+        <h3 id="toolWsTitle" style="font-size:1.1rem;margin-bottom:12px">Tool</h3>
+
+        <!-- language row (for translate) -->
+        <div id="toolLangRow" style="display:none;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:100px">
+            <label style="display:block;font-size:0.78rem;color:var(--text3);margin-bottom:4px" data-i="toolLangFrom">From</label>
+            <input type="text" id="toolLangFrom" class="input" placeholder="English" style="font-size:0.88rem">
+          </div>
+          <div style="flex:1;min-width:100px">
+            <label style="display:block;font-size:0.78rem;color:var(--text3);margin-bottom:4px" data-i="toolLangTo">To</label>
+            <input type="text" id="toolLangTo" class="input" placeholder="සිංහල" style="font-size:0.88rem">
+          </div>
+        </div>
+
+        <textarea id="toolInput" class="textarea" data-ph="toolInput" placeholder="Enter your text here…" rows="4"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="toolGo" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span data-i="toolGo">Go</span>
+          </button>
+          <button id="toolClear" class="btn btn-ghost" data-i="toolClear">Clear</button>
+        </div>
+        <div id="toolOutput" class="tool-output" data-placeholder="Output will appear here…"></div>
+      </div>
+    </section>
+
+    <!-- ─── SETTINGS ─── -->
+    <section id="view-settings" class="view">
+      <h2 style="font-size:1.2rem;margin-bottom:16px" data-i="settingsTitle">Settings</h2>
+
+      <!-- Language -->
+      <div class="settings-section">
+        <h3 data-i="language">Language</h3>
+        <div class="setting-row">
+          <label data-i="language">Language</label>
+          <div class="sr-right">
+            <button class="btn btn-sm btn-ghost" id="langToggleAlt" onclick="document.getElementById('langToggle').click()">English / සිංහල</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Theme -->
+      <div class="settings-section">
+        <h3 data-i="theme">Theme</h3>
+        <div class="setting-row">
+          <label data-i="theme">Theme</label>
+          <div class="sr-right">
+            <span style="font-size:0.85rem;color:var(--text3)" data-i="dark">Dark</span>
+            <div class="toggle" id="themeToggleAlt"></div>
+            <span style="font-size:0.85rem;color:var(--text3)" data-i="light">Light</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Provider -->
+      <div class="settings-section">
+        <h3 data-i="aiProvider">AI Provider</h3>
+        <div class="provider-cards">
+          <div class="provider-card card active" data-provider="free">
+            <div class="pc-icon">🌸</div>
+            <div class="pc-info">
+              <div class="pc-name" data-i="providerFree">Free (Pollinations)</div>
+              <div class="pc-desc" data-i="providerFreeDesc">No key needed · basic models · rate limited</div>
+            </div>
+            <div class="pc-check">✓</div>
+          </div>
+          <div class="provider-card card" data-provider="custom">
+            <div class="pc-icon">🔑</div>
+            <div class="pc-info">
+              <div class="pc-name" data-i="providerCustom">Custom (OpenAI-compatible)</div>
+              <div class="pc-desc" data-i="providerCustomDesc">Groq, OpenAI, OpenRouter, Ollama, etc.</div>
+            </div>
+            <div class="pc-check">✓</div>
+          </div>
+          <div class="provider-card card" data-provider="rs">
+            <div class="pc-icon">🤖</div>
+            <div class="pc-info">
+              <div class="pc-name" data-i="providerRS">RS AI Server</div>
+              <div class="pc-desc" data-i="providerRSDesc">Your own RS AI server</div>
+            </div>
+            <div class="pc-check">✓</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom provider form -->
+      <div id="pf-custom" class="provider-form card">
+        <div class="pf-row">
+          <label data-i="baseUrl">Base URL</label>
+          <input type="url" id="customBaseUrl" class="input" data-ph="customBaseUrlHint" placeholder="e.g. https://api.groq.com/openai/v1">
+        </div>
+        <div class="pf-row">
+          <label data-i="apiKey">API Key</label>
+          <input type="password" id="customKey" class="input" data-ph="customKeyHint" placeholder="sk-... or gsk_...">
+        </div>
+        <div class="pf-row">
+          <label data-i="modelLabel">Model</label>
+          <input type="text" id="customModel" class="input" data-ph="customModelHint" placeholder="e.g. llama-3.3-70b-versatile">
+        </div>
+      </div>
+
+      <!-- RS Server form -->
+      <div id="pf-rs" class="provider-form card">
+        <div class="pf-row">
+          <label data-i="serverUrl">Server URL</label>
+          <input type="url" id="rsUrl" class="input" data-ph="rsUrlHint" placeholder="e.g. http://localhost:8000">
+        </div>
+        <div class="pf-row">
+          <label data-i="token">Token</label>
+          <input type="password" id="rsToken" class="input" data-ph="rsTokenHint" placeholder="RS_API_TOKEN (optional)">
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button id="settingsSave" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><polyline points="20 6 9 17 4 12"/></svg>
+          <span data-i="save">Save</span>
+        </button>
+        <button id="settingsTest" class="btn btn-ghost" data-i="testConnection">Test Connection</button>
+      </div>
+
+      <!-- About -->
+      <div class="settings-section" style="margin-top:24px">
+        <h3 data-i="about">About</h3>
+        <div class="info-block" data-i="aboutText">RS AI Hub v1.0 · All-in-One AI app by the RS team.
+Sinhala &amp; English · Image generation · Chat · Tools · Voice.
+Powered by Pollinations.ai + OpenAI-compatible APIs.</div>
+      </div>
+    </section>
+
+  </div><!-- /.main -->
+
+  <!-- ═══════ BOTTOM NAV ═══════ -->
+  <nav class="tabbar">
+    <button data-tab="home" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z"/></svg>
+      <span data-i="navHome">Home</span>
+    </button>
+    <button data-tab="chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <span data-i="navChat">Chat</span>
+    </button>
+    <button data-tab="imagine">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      <span data-i="navImagine">Imagine</span>
+    </button>
+    <button data-tab="tools">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+      <span data-i="navTools">Tools</span>
+    </button>
+    <button data-tab="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <span data-i="navSettings">Settings</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Scripts -->
+<script src="i18n.js"></script>
+<script src="ai.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>

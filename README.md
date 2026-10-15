@@ -1,6 +1,7 @@
 # RS AI — සිංහල/English LLM (up to 4B) + Android App 🤖
 
 [![Android APK](https://github.com/Rusindu12/Rs-et/actions/workflows/android.yml/badge.svg)](https://github.com/Rusindu12/Rs-et/actions/workflows/android.yml)
+[![RS AI Hub APK](https://github.com/Rusindu12/Rs-et/actions/workflows/aihub.yml/badge.svg)](https://github.com/Rusindu12/Rs-et/actions/workflows/aihub.yml)
 [![Python CI](https://github.com/Rusindu12/Rs-et/actions/workflows/python-ci.yml/badge.svg)](https://github.com/Rusindu12/Rs-et/actions/workflows/python-ci.yml)
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Rusindu12/Rs-et/blob/main/notebooks/RS_AI_Colab.ipynb)
 
@@ -40,6 +41,12 @@ Rs-et/
 │   ├── app/src/main/java/com/cryptoai/pro/  # WebView shell + HMAC signing bridge
 │   ├── INSTALL_SI.md       # 📖 සිංහල install + usage guide
 │   └── README.md           # 📖 features + APK link
+│
+├── ai-hub-app/             # 🆕 RS AI Hub — All-in-One AI APK (chat + imagine + tools + voice)
+│   ├── app/src/main/assets/           #   Web app (HTML/CSS/JS) — the real product
+│   ├── app/src/main/java/.../aihub/   #   WebView shell + bridge (TTS, STT, save, share)
+│   ├── README.md                      #   📖 features + build guide
+│   └── INSTALL_SI.md                  #   📖 සිංහල install guide
 │
 └── web/                    # 🌐 public website + the same terminal as a web app (PWA)
     ├── index.html          #   landing page (EN/සිංහල, live prices, FAQ)
@@ -104,6 +111,19 @@ stop · price alerts · optional AI explanation — සිංහල/English ද�
 
 👉 **APK:** [releases/tag/cryptoai-apk-latest](https://github.com/Rusindu12/Rs-et/releases/tag/cryptoai-apk-latest)
 · සම්පූර්ණ විස්තර: [`crypto-app/README.md`](crypto-app/README.md)
+
+## 🤖 RS AI Hub — All-in-One AI APK 🆕
+
+සියලුම AI features එක app එකකට — **Chat · Imagine · Tools · Voice · Vision**.
+100% free (Pollinations), or bring your own API key (Groq, OpenAI, OpenRouter, Ollama…).
+
+| 💬 Chat | 🎨 Imagine | 🌍 Translate | 💻 Code | 📖 Homework | 🎤 Voice |
+|---|---|---|---|---|---|
+| 8 personas + streaming + vision | Flux/Turbo + gallery | 100+ languages | Generate · explain · debug | Step-by-step | Sinhala STT + TTS |
+
+👉 **APK:** [releases/tag/aihub-apk-latest](https://github.com/Rusindu12/Rs-et/releases/tag/aihub-apk-latest)
+· සම්පූර්ණ විස්තර: [`ai-hub-app/README.md`](ai-hub-app/README.md)
+· සිංහල guide: [`ai-hub-app/INSTALL_SI.md`](ai-hub-app/INSTALL_SI.md)
 
 ## 🌐 Website
 
