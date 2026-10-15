@@ -44,7 +44,20 @@ jobs:
 
       - name: Build installable arm64 APK
         working-directory: edumate_flutter
-        run: flutter build apk --release --target-platform android-arm64
+        run: |
+          set -o pipefail
+          flutter build apk --release --target-platform android-arm64 2>&1 | tee /tmp/edumate-flutter-build.log
+
+      - name: Surface build failure details
+        if: failure()
+        shell: bash
+        run: |
+          if [[ -f /tmp/edumate-flutter-build.log ]]; then
+            details="$(tail -n 35 /tmp/edumate-flutter-build.log | tr '\\n' ' ' | cut -c1-3500)"
+            echo "::error title=EduMate APK build diagnostics::$details"
+          else
+            echo "::error title=EduMate APK build diagnostics::Flutter build log not found."
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
