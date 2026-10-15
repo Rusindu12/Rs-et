@@ -109,7 +109,7 @@ class ProgressScreen extends StatelessWidget {
                               }
                               final label = subjects[index];
                               return SideTitleWidget(
-                                axisSide: meta.axisSide,
+                                meta: meta,
                                 child: SizedBox(
                                   width: 56,
                                   child: Text(
