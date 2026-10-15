@@ -1,0 +1,1 @@
+`study_buddy.json` is a small, self-contained Lottie owl animation used by the splash screen. Replace it with your own optimized Lottie JSON (keeping the filename) if you commission a custom mascot.

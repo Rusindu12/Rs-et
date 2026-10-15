@@ -1,0 +1,55 @@
+name: Build EduMate AI APK
+
+on:
+  push:
+    branches:
+      - arena/fd6fc0eb-rs-et
+    paths:
+      - "edumate_flutter/**"
+      - ".github/workflows/edumate-apk.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Android arm64 APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ hashFiles('edumate_flutter/pubspec.yaml') }}
+
+      - name: Generate Android platform files
+        working-directory: edumate_flutter
+        run: flutter create --platforms android .
+
+      - name: Resolve Flutter packages
+        working-directory: edumate_flutter
+        run: flutter pub get
+
+      - name: Run Flutter tests
+        working-directory: edumate_flutter
+        run: flutter test
+
+      - name: Build installable arm64 APK
+        working-directory: edumate_flutter
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: edumate-ai-android-arm64
+          path: edumate_flutter/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30

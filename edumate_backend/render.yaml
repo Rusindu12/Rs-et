@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: edumate-ai-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: LLM_ENDPOINT
+        sync: false
+      - key: LLM_MODEL
+        value: meta-llama/Llama-3.2-3B-Instruct
+      - key: LLM_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"

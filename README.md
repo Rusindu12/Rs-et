@@ -49,6 +49,12 @@ Rs-et/
     └── README.md           # 📖 deploy guide (GitHub Pages)
 ```
 
+## 🎓 EduMate AI — Flutter study companion
+
+A separate Sinhala-first Flutter APK foundation for Sri Lankan Grade 1–13 learners is now in [`edumate_flutter/`](edumate_flutter/README_SI.md), with a lightweight FastAPI service in [`edumate_backend/`](edumate_backend/README_SI.md). It includes grade/stream → subject → chapter navigation, AI chat context, quiz and progress UI, OCR/voice hooks, PDF workflows, Firebase integration points, and Hive offline caching. **Explore demo mode** works without Firebase or an AI endpoint; connect an OpenAI-compatible self-hosted model endpoint on the backend to enable real AI responses. No model API key is embedded in the APK.
+
+Setup, Render/Firebase configuration, Firestore schema, APK build steps, and free-hosting limitations are documented in [`edumate_flutter/README_SI.md`](edumate_flutter/README_SI.md). An optional HF Docker Space template for Llama 3.2 3B is in [`edumate_model_space/`](edumate_model_space/README.md). This is a feature-rich MVP foundation with sample curriculum—not a pre-seeded official syllabus, a production-ready service, or a built APK.
+
 ## 🚀 Quick Start
 
 ```bash

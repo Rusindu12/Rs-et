@@ -23,9 +23,20 @@ model/runs/
 # Android / Gradle
 android-app/.gradle/
 android-app/local.properties
+edumate_flutter/android/local.properties
 **/build/
 *.apk
 *.aab
+
+# Flutter / Dart generated output
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/android/app/google-services.json
+**/ios/Runner/GoogleService-Info.plist
 
 # Secrets — API keys (use server/.env.example as the template)
 .env
