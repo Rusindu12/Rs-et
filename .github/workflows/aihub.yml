@@ -1,0 +1,91 @@
+name: RS AI Hub APK
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "ai-hub-app/**"
+      - ".github/workflows/aihub.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # for the APK release
+  issues: write     # for auto failure reports
+
+jobs:
+  build:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Check the web layer (assets must be the real app, not a placeholder)
+        working-directory: ai-hub-app/app/src/main/assets
+        run: |
+          set -e
+          node --check ai.js
+          node --check app.js
+          node --check i18n.js
+          for f in index.html app.css ai.js app.js i18n.js; do test -s "$f" || { echo "missing $f"; exit 1; }; done
+          test "$(wc -c < index.html)" -gt 15000 || { echo "index.html looks like a placeholder"; exit 1; }
+          grep -q "Pollinations" ai.js && grep -q "renderMD" app.js
+          grep -q "Imagine" index.html && grep -q "persona" index.html
+          echo "assets OK: index.html $(wc -c < index.html) bytes · ai.js $(wc -c < ai.js) bytes · app.js $(wc -c < app.js) bytes"
+
+      - name: Build APK (debug-signed, installable)
+        working-directory: ai-hub-app
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+
+      - name: Report failure log as GitHub issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "### APK build failed"
+            echo "Run: https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "**Kotlin errors (e: lines):**"
+            echo '```'
+            grep -E "^e: |error:" /tmp/build.log | head -40
+            echo '```'
+            echo "**Log tail:**"
+            echo '```gradle'
+            tail -c 3500 /tmp/build.log
+            echo '```'
+          } | gh issue create \
+                --title "❌ RS AI Hub APK build failed (${GITHUB_SHA:0:7})" \
+                --body-file - \
+                --repo "${REPO}" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RS-AI-Hub-debug-apk
+          path: ai-hub-app/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Publish APK to GitHub Releases (permanent link)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          cp ai-hub-app/app/build/outputs/apk/debug/*.apk /tmp/RS-AI-Hub.apk
+          gh release view aihub-apk-latest --repo "${REPO}" >/dev/null 2>&1 || \
+            gh release create aihub-apk-latest --repo "${REPO}" \
+                --title "RS AI Hub — All-in-One AI APK (latest debug build)" \
+                --notes "Auto-built from main branch. Debug-signed, installable. Commit: ${SHA}"
+          gh release upload aihub-apk-latest /tmp/RS-AI-Hub.apk --repo "${REPO}" --clobber
+          echo "APK is live at: https://github.com/${REPO}/releases/tag/aihub-apk-latest"
