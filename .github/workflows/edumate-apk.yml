@@ -34,6 +34,34 @@ jobs:
         working-directory: edumate_flutter
         run: flutter create --platforms android .
 
+      - name: Add ML Kit recognizer models
+        working-directory: edumate_flutter
+        shell: bash
+        run: |
+          if [[ -f android/app/build.gradle.kts ]]; then
+            cat >> android/app/build.gradle.kts <<'EOF'
+
+          dependencies {
+              implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+              implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+          }
+          EOF
+          elif [[ -f android/app/build.gradle ]]; then
+            cat >> android/app/build.gradle <<'EOF'
+          dependencies {
+              implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
+              implementation 'com.google.mlkit:text-recognition-devanagari:16.0.1'
+              implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'
+              implementation 'com.google.mlkit:text-recognition-korean:16.0.1'
+          }
+          EOF
+          else
+            echo "Android app Gradle build file not found" >&2
+            exit 1
+          fi
+
       - name: Resolve Flutter packages
         working-directory: edumate_flutter
         run: flutter pub get
